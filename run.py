@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 from sklearn.model_selection import train_test_split
 from matplotlib.ticker import ScalarFormatter 
+import pickle
 
 # ==============================================================================
 # 1. 全局配置参数 (All parameters are here for easy adjustment)
@@ -20,22 +21,25 @@ TEST_SIZE = 0.2
 
 # --- 模型与训练参数 ---
 # n也作为一个变量进行测试
-N_NEURONS_LIST = [32, 64, 128]  # 您可以修改或增加神经元数量的测试列表
+N_NEURONS_LIST = [32]  # 您可以修改或增加神经元数量的测试列表
 LEARNING_RATE = 0.01
-EPOCHS = 1000
+EPOCHS_LIST = [100, 1000, 10000] # 实验不同训练时长的影响
+epochs = EPOCHS_LIST[-1]
 
 # --- 实验核心：β 扫描列表 ---
 # 定义当前要使用的 BETA 列表
-BETA_TO_RUN = np.arange(5, 51, 5)
+BETA_VISUALIZE = [0.5,10,500] # 指定需要可视化拟合曲线的beta值
+BETA_BASE = [0.5,10,500]
+BETA_TO_RUN = sorted(list(set(BETA_BASE + BETA_VISUALIZE))) # 合并并排序
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results", f"{BETA_TO_RUN[0]}_{BETA_TO_RUN[-1]}_run1")
-# 设置随机种子以保证结果可复现
-torch.manual_seed(52)
-np.random.seed(52)
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results")
+# # 设置随机种子以保证结果可复现
+# torch.manual_seed(52)
+# np.random.seed(52)
 
-# # --- 统计稳定性测试参数 ---
-# NUM_RUNS = 5  # 设置每个 (n, β) 组合独立训练的次数
+# --- 统计稳定性测试参数 ---
+SEED_LIST = [42,38,100]  # 使用多个随机种子进行重复实验
 
 # ==============================================================================
 # 2. 模型定义 (Model Definition)
@@ -104,15 +108,13 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
         output_dir (str): 图像输出目录
     Returns:
         std_dev (float): 测试集上的误差标准差
+        y_pred (torch.Tensor): 模型在测试集上的预测值
     """
     criterion = lambda y_pred, y_true: torch.std(y_true - y_pred)  # 标准差损失函数
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     train_losses = []
     val_losses = []
-
-    best_model_state = None
-    best_val_loss = float('inf')
     
     for epoch in range(epochs):
         model.train()
@@ -132,16 +134,18 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
                 val_loss = criterion(val_outputs, y_test)
                 val_losses.append(val_loss.item())
 
-                # 保存最佳模型
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_model_state = model.state_dict()
-
             print(f"Epoch [{epoch}/{epochs}], n={n}, beta={beta}, Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
 
-    # 加载最佳模型
-    if best_model_state is not None:
-        model.load_state_dict(best_model_state)
+        # 如果当前轮次是epochlist中的一个元素
+        if epoch in EPOCHS_LIST and beta in BETA_VISUALIZE:
+            # 计算当前轮次的预测值
+            model.eval()
+            with torch.no_grad():
+                y_pred = model(X_test)
+                error = y_test - y_pred
+                std_dev = error.std().item()
+                results[epoch][n][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
+                results[epoch][n][beta][seed]['y_pred_std'] = std_dev
 
     # --- 绘制并保存当前参数下的损失曲线 ---
     plt.figure(figsize=(10, 6))
@@ -163,7 +167,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
         error = y_test - y_pred
         std_dev = error.std().item()
         
-    return std_dev
+    return std_dev, y_pred
 
 
 # ==============================================================================
@@ -174,56 +178,37 @@ if __name__ == "__main__":
     # 创建输出目录
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
-        
+
     # 生成数据
     X_train, y_train, X_test, y_test = generate_data(DATA_RANGE, NUM_POINTS, TEST_SIZE)
     
-    # 存储所有实验结果
-    results = {}
+    # 调整results结构以容纳epochs, mean_std, 和 std_of_stds
+    results = {epochs: {n: {beta: {seed: {'y_pred_std': None, 'y_pred':None} for seed in SEED_LIST} for beta in BETA_VISUALIZE } for n in N_NEURONS_LIST} for epochs in EPOCHS_LIST}
 
-    # 主循环：遍历神经元数量和beta值
     for n in N_NEURONS_LIST:
         print(f"\n{'='*20} Starting Experiment for n = {n} Neurons {'='*20}")
-        results[n] = {'betas': [], 'stds': []}
         
         for beta in BETA_TO_RUN:
             print(f"\n--- Training with n={n}, beta={beta} ---")
+
+            for seed in SEED_LIST:
+                # 设置随机种子
+                print(f"Setting seed to {seed} for n={n}, beta={beta}")
+                torch.manual_seed(seed)
+                np.random.seed(seed)
             
-            # 实例化模型
-            model = SimpleMLP(n_neurons=n, beta=beta).to(DEVICE)
-            
-            # 训练和评估
-            std_dev = train_and_evaluate(
-                model, X_train, y_train, X_test, y_test, LEARNING_RATE, EPOCHS, n, beta, OUTPUT_DIR
-            )
-            
-            # 记录结果
-            results[n]['betas'].append(beta) # x
-            results[n]['stds'].append(std_dev) # y
+                # 实例化模型
+                model = SimpleMLP(n_neurons=n, beta=beta).to(DEVICE)
+                
+                # 训练和评估
+                std_dev, y_pred = train_and_evaluate(
+                    model, X_train, y_train, X_test, y_test, LEARNING_RATE, epochs, n, beta, OUTPUT_DIR
+                )
+
             
             print(f"--- Result for n={n}, beta={beta}: std(y_err) = {std_dev:.6f} ---")
 
-    # --- 绘制并保存最终的 std(y_err) vs. beta 总结图 ---
-    print("\nAll experiments finished. Generating final summary plot...")
-    plt.figure(figsize=(12, 8))
-    
-    for n, data in results.items():
-        # 将结果排序，以便绘图
-        sorted_data = sorted(zip(data['betas'], data['stds'])) # 先配对成元组，再对第一个元素进行排序， 防止输入的是无序的
-        betas, stds = zip(*sorted_data) # 解压缩
-        plt.plot(betas, stds, marker='o', linestyle='-', label=f'n = {n} neurons') # 将所有线绘制在同一张图上
 
-    plt.xscale('log')  # Beta值跨度很大，使用对数坐标轴更清晰
-    plt.title('Standard Deviation of Error vs. Beta (Smoothness Parameter)')
-    plt.xlabel('Beta (β) - Log Scale')
-    plt.ylabel('Standard Deviation of Error (std(y_err))')
-    plt.legend()
-    plt.grid(True, which="major", ls="--")
-    ax = plt.gca() # 获取当前坐标轴
-    ax.xaxis.set_major_formatter(ScalarFormatter())
-    plt.xticks(BETA_TO_RUN, labels=[str(b) for b in BETA_TO_RUN], rotation=45, ha='right')  #它会在X轴上，精确地在每个 Beta 值的位置上创建带标签的刻度。
-    
-    summary_plot_path = os.path.join(OUTPUT_DIR, 'summary_std_vs_beta.png')
-    plt.savefig(summary_plot_path)
-    print(f"Final summary plot saved to: {summary_plot_path}")
-    plt.show()
+    # 将results保存为pickle文件
+    with open(os.path.join(OUTPUT_DIR, f'results.pkl'), 'wb') as f:
+        pickle.dump(results, f)
