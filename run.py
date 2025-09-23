@@ -134,18 +134,18 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
                 val_loss = criterion(val_outputs, y_test)
                 val_losses.append(val_loss.item())
 
-            print(f"Epoch [{epoch}/{epochs}], n={n}, beta={beta}, Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
+            print(f"Epoch [{epoch}/{epochs}], n={n}, beta={beta}, seed={seed} Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
 
         # 如果当前轮次是epochlist中的一个元素
-        if epoch in EPOCHS_LIST and beta in BETA_VISUALIZE:
+        if epoch + 1 in EPOCHS_LIST and beta in BETA_VISUALIZE:
             # 计算当前轮次的预测值
             model.eval()
             with torch.no_grad():
                 y_pred = model(X_test)
                 error = y_test - y_pred
                 std_dev = error.std().item()
-                results[epoch][n][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
-                results[epoch][n][beta][seed]['y_pred_std'] = std_dev
+                results['train_results'][epoch + 1][n][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
+                results['train_results'][epoch + 1][n][beta][seed]['y_pred_std'] = std_dev
 
     # --- 绘制并保存当前参数下的损失曲线 ---
     plt.figure(figsize=(10, 6))
@@ -183,8 +183,22 @@ if __name__ == "__main__":
     X_train, y_train, X_test, y_test = generate_data(DATA_RANGE, NUM_POINTS, TEST_SIZE)
     
     # 调整results结构以容纳epochs, mean_std, 和 std_of_stds
-    results = {epochs: {n: {beta: {seed: {'y_pred_std': None, 'y_pred':None} for seed in SEED_LIST} for beta in BETA_VISUALIZE } for n in N_NEURONS_LIST} for epochs in EPOCHS_LIST}
-
+    results = {
+        # 直接将测试数据存进去 (注意从Tensor转为Numpy array)
+        'X_test': X_test.cpu().numpy(),
+        'y_test': y_test.cpu().numpy(),
+        
+        # 将原来的训练结果嵌套在一个新的键 'train_results' 中
+        'train_results': {
+            epochs: {
+                n: {
+                    beta: {
+                        seed: {'y_pred_std': None, 'y_pred': None} for seed in SEED_LIST
+                    } for beta in BETA_VISUALIZE
+                } for n in N_NEURONS_LIST
+            } for epochs in EPOCHS_LIST
+        }
+    }
     for n in N_NEURONS_LIST:
         print(f"\n{'='*20} Starting Experiment for n = {n} Neurons {'='*20}")
         
@@ -205,8 +219,7 @@ if __name__ == "__main__":
                     model, X_train, y_train, X_test, y_test, LEARNING_RATE, epochs, n, beta, OUTPUT_DIR
                 )
 
-            
-            print(f"--- Result for n={n}, beta={beta}: std(y_err) = {std_dev:.6f} ---")
+                print(f"--- Result for n={n}, beta={beta}, seed={seed}: std(y_err) = {std_dev:.6f} ---")
 
 
     # 将results保存为pickle文件
