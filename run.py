@@ -153,6 +153,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
     plt.title(f'Loss Curve for n={n}, beta={beta}')
     plt.xlabel('Epochs (x10)')
     plt.ylabel('MSE')
+    plt.yscale('log')
     plt.legend()
     plt.grid(True)
     loss_curve_path = os.path.join(output_dir, f'loss_curve_n{n}_beta{beta}.png')

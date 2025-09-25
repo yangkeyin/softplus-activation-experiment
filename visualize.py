@@ -58,6 +58,8 @@ if __name__ == '__main__':
         # plt.xscale('log')
         plt.xlabel('Beta (β)')
         plt.ylabel('Mean Standard Deviation of Error')
+        plt.yscale('log')
+        plt.xscale('log')
         
         plt.legend() # 显示 label
         plt.grid(True, which="both", linestyle='--')
