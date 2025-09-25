@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 from sklearn.model_selection import train_test_split
 import pickle
+from matplotlib.ticker import FormatStrFormatter, NullLocator, MaxNLocator
 
 # ==============================================================================
 # 1. 全局配置参数 (All parameters are here for easy adjustment)
@@ -32,7 +33,7 @@ BETA_BASE = [0.5,10,20,30,40,50,100]
 BETA_TO_RUN = sorted(list(set(BETA_BASE + BETA_VISUALIZE))) # 合并并排序
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v1")
 # # 设置随机种子以保证结果可复现
 # torch.manual_seed(52)
 # np.random.seed(52)
@@ -147,18 +148,28 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
                 results['train_results'][epoch + 1][n][beta][seed]['y_pred_std'] = std_dev
 
     # --- 绘制并保存当前参数下的损失曲线 ---
+    epochs_recorded = np.arange(len(train_losses)) * 10 
     plt.figure(figsize=(10, 6))
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Validation Loss')
-    plt.title(f'Loss Curve for n={n}, beta={beta}')
-    plt.xlabel('Epochs (x10)')
-    plt.ylabel('MSE')
-    plt.yscale('log')
-    plt.legend()
-    plt.grid(True)
+    ax = plt.gca()
+    ax.plot(epochs_recorded, train_losses, label='Train Loss')
+    ax.plot(epochs_recorded, val_losses, label='Validation Loss')
+    ax.set_title(f'Loss Curve for n={n}, beta={beta}')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('MSE')
+    ax.set_yscale('log')
+    # 合并训练损失和验证损失，去除重复值并排序，以此设置 y 轴刻度
+    all_losses = sorted(set(train_losses + val_losses))
+    ax.set_yticks(all_losses)
+    # 对y轴的刻度倾斜45度
+    ax.tick_params(axis='y', labelrotation=45)
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=10))
+    ax.yaxis.set_minor_locator(NullLocator())
+    ax.legend()
+    ax.grid(True)
     loss_curve_path = os.path.join(output_dir, f'loss_curve_n{n}_beta{beta}.png')
-    plt.savefig(loss_curve_path)
-    plt.close()
+    ax.figure.savefig(loss_curve_path)
+    plt.close(ax.figure)
     
     # --- 在测试集上计算最终误差的标准差 ---
     model.eval()

@@ -2,6 +2,7 @@ import pickle
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import FormatStrFormatter, NullLocator
 
 
 
@@ -23,6 +24,9 @@ if __name__ == '__main__':
             os.makedirs(epoch_dir)  
         # 绘制epoch下对应的每个neuron std图
         plt.figure(figsize=(10, 6))
+        ax = plt.gca() # 获取axes对象，方便更精细地调控
+        # 使用all_mean_stds保存所有neuron的mean_std
+        all_mean_stds = []
 
         # 在该目录下，生成每个neuron的图
         for n in train_results[epoch].keys():
@@ -49,19 +53,30 @@ if __name__ == '__main__':
 
             betas = sorted(train_results[epoch][n].keys())
             mean_stds = [train_results[epoch][n][beta]['mean_std'] for beta in betas]
-            # 打印x坐标轴
-            plt.xticks(betas)
-            plt.plot(betas, mean_stds, 'o-', label=f'n={n}') # 用 label 区分不同的 n
+            # 保存所有neuron的mean_std
+            all_mean_stds.extend(mean_stds)
+            ax.plot(betas, mean_stds, 'o-', label=f'n={n}') # 用 label 区分不同的 n
         
 
-        plt.title(f'Mean Error Std Dev vs. Beta (Epoch: {epoch})')
+        ax.set_title(f'Mean Error Std Dev vs. Beta (Epoch: {epoch})')
         # plt.xscale('log')
-        plt.xlabel('Beta (β)')
-        plt.ylabel('Mean Standard Deviation of Error')
-        plt.yscale('log')
-        plt.xscale('log')
+        ax.set_xlabel('Beta (β)')
+        ax.set_ylabel('Mean Standard Deviation of Error')
         
-        plt.legend() # 显示 label
-        plt.grid(True, which="both", linestyle='--')
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+
+        # 强制设置x轴的刻度
+        ax.set_xticks(betas)
+        # 使用ScalFormatter设置x轴的刻度格式
+        ax.xaxis.set_major_formatter(plt.ScalarFormatter())
+        # 强制设置y轴的刻度
+        ax.set_yticks(sorted(list(set(all_mean_stds))))
+        # 使用ScalFormatter设置y轴的刻度格式
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+        ax.yaxis.set_minor_locator(NullLocator())
+
+        ax.legend() # 显示 label
+        ax.grid(True, which="both", linestyle='--')
         plt.savefig(os.path.join(epoch_dir, f'std_comparison_{epoch}.png'))
         plt.close()
