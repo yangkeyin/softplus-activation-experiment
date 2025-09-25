@@ -29,15 +29,15 @@ if __name__ == '__main__':
             plt.figure(figsize=(10, 6))
             plt.plot(x_test, y_test, label='sin(x)')
             plt.scatter(x_test, y_test, s=10, alpha=0.5)
-            # 读取所有beta对应的y_pred和y_pred_std
+            # 读取所有beta对应的y_pred和y_pred_stds
             for beta in train_results[epoch][n].keys():
                 # 计算y_pred的平均值和y_pred_std的平均值
                 y_preds = [train_results[epoch][n][beta][seed]['y_pred'] for seed in train_results[epoch][n][beta].keys()]
-                y_preds = np.mean(y_preds, axis=0)
+                y_preds = np.mean(y_preds, axis=0)[sort_indices]
                 y_pred_std = np.mean([train_results[epoch][n][beta][seed]['y_pred_std'] for seed in train_results[epoch][n][beta].keys()])
                 train_results[epoch][n][beta]['mean_std'] = y_pred_std
                 # 绘制拟合图像
-                plt.plot(x_test, y_preds, label=f'beta={beta}')
+                plt.plot(x_test, y_preds, label=f'beta={beta}') 
                 # 绘制之前的点
                 plt.scatter(x_test, y_preds, s=10, alpha=0.5)
             plt.title(f'Neuron {n} - Epoch {epoch}')
@@ -49,17 +49,17 @@ if __name__ == '__main__':
 
             betas = sorted(train_results[epoch][n].keys())
             mean_stds = [train_results[epoch][n][beta]['mean_std'] for beta in betas]
+            # 打印x坐标轴
+            plt.xticks(betas)
             plt.plot(betas, mean_stds, 'o-', label=f'n={n}') # 用 label 区分不同的 n
         
 
         plt.title(f'Mean Error Std Dev vs. Beta (Epoch: {epoch})')
-        plt.xscale('log')
+        # plt.xscale('log')
         plt.xlabel('Beta (β)')
         plt.ylabel('Mean Standard Deviation of Error')
+        
         plt.legend() # 显示 label
         plt.grid(True, which="both", linestyle='--')
         plt.savefig(os.path.join(epoch_dir, f'std_comparison_{epoch}.png'))
         plt.close()
-
-        
-

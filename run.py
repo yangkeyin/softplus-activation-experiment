@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from sklearn.model_selection import train_test_split
-from matplotlib.ticker import ScalarFormatter 
 import pickle
 
 # ==============================================================================
@@ -21,15 +20,15 @@ TEST_SIZE = 0.2
 
 # --- 模型与训练参数 ---
 # n也作为一个变量进行测试
-N_NEURONS_LIST = [32]  # 您可以修改或增加神经元数量的测试列表
+N_NEURONS_LIST = [32, 64, 128, 512]  # 您可以修改或增加神经元数量的测试列表
 LEARNING_RATE = 0.01
 EPOCHS_LIST = [100, 1000, 10000] # 实验不同训练时长的影响
 epochs = EPOCHS_LIST[-1]
 
 # --- 实验核心：β 扫描列表 ---
 # 定义当前要使用的 BETA 列表
-BETA_VISUALIZE = [0.5,10,500] # 指定需要可视化拟合曲线的beta值
-BETA_BASE = [0.5,10,500]
+BETA_VISUALIZE = [0.5,10,20,30,40,50,100] # 指定需要可视化拟合曲线的beta值
+BETA_BASE = [0.5,10,20,30,40,50,100]
 BETA_TO_RUN = sorted(list(set(BETA_BASE + BETA_VISUALIZE))) # 合并并排序
 
 # --- 输出配置 ---
@@ -39,7 +38,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results")
 # np.random.seed(52)
 
 # --- 统计稳定性测试参数 ---
-SEED_LIST = [42,38,100]  # 使用多个随机种子进行重复实验
+SEED_LIST = [42,38,50,100]  # 使用多个随机种子进行重复实验
 
 # ==============================================================================
 # 2. 模型定义 (Model Definition)
@@ -50,7 +49,7 @@ class SimpleMLP(nn.Module):
         super(SimpleMLP, self).__init__()
         self.layers = nn.Sequential(
             nn.Linear(1, n_neurons),
-            nn.Softplus(beta), # default:torch.nn.Softplus(beta=1.0, threshold=20)
+            nn.Softplus(beta), # default:torch.nn.Softplus(beta=1.0, threshold=20) beta*x   log(1+exp(beta*x)) -> x
             nn.Linear(n_neurons, 1)
         )
     
@@ -110,7 +109,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
         std_dev (float): 测试集上的误差标准差
         y_pred (torch.Tensor): 模型在测试集上的预测值
     """
-    criterion = lambda y_pred, y_true: torch.std(y_true - y_pred)  # 标准差损失函数
+    criterion = nn.MSELoss()  # 均方误差损失函数
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     train_losses = []
@@ -153,7 +152,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
     plt.plot(val_losses, label='Validation Loss')
     plt.title(f'Loss Curve for n={n}, beta={beta}')
     plt.xlabel('Epochs (x10)')
-    plt.ylabel('Standard Deviation')
+    plt.ylabel('MSE')
     plt.legend()
     plt.grid(True)
     loss_curve_path = os.path.join(output_dir, f'loss_curve_n{n}_beta{beta}.png')
