@@ -1,1 +1,5 @@
-experiment_results/
+experiment_results*/
+test_*.py
+__pycache__/
+demo.ipynb
+.gitignore
