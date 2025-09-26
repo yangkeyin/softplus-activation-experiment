@@ -7,7 +7,7 @@ from matplotlib.ticker import FormatStrFormatter, NullLocator
 
 
 if __name__ == '__main__':
-    with open('experiment_results/results.pkl', 'rb') as f:
+    with open('experiment_results_v1/results.pkl', 'rb') as f:
         results = pickle.load(f)
     x_test = results['X_test']
     y_test = results['y_test']
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     y_test = y_test[sort_indices]
 
     for epoch in train_results.keys():
-        epoch_dir = os.path.join('experiment_results', f'epoch_{epoch}') # 读取epoch，为每个epoch生成一个目录
+        epoch_dir = os.path.join('experiment_results_v1', f'epoch_{epoch}') # 读取epoch，为每个epoch生成一个目录
         if not os.path.exists(epoch_dir):
             os.makedirs(epoch_dir)  
         # 绘制epoch下对应的每个neuron std图
