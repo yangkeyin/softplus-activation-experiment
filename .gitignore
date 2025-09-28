@@ -4,3 +4,4 @@ __pycache__/
 demo.ipynb
 .gitignore
 softplus_activation/
+test_results/

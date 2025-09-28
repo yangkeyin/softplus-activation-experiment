@@ -28,12 +28,12 @@ epochs = EPOCHS_LIST[-1]
 
 # --- 实验核心：β 扫描列表 ---
 # 定义当前要使用的 BETA 列表
-BETA_VISUALIZE = [0.5,10,20,30,40,50,100] # 指定需要可视化拟合曲线的beta值
-BETA_BASE = [0.5,10,20,30,40,50,100]
+BETA_VISUALIZE = [0.5,1,2,4,8,10,20,50] # 指定需要可视化拟合曲线的beta值
+BETA_BASE = [0.5,1,2,4,8,10,20,50]
 BETA_TO_RUN = sorted(list(set(BETA_BASE + BETA_VISUALIZE))) # 合并并排序
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v1")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v2")
 # # 设置随机种子以保证结果可复现
 # torch.manual_seed(52)
 # np.random.seed(52)
@@ -198,6 +198,8 @@ if __name__ == "__main__":
         # 直接将测试数据存进去 (注意从Tensor转为Numpy array)
         'X_test': X_test.cpu().numpy(),
         'y_test': y_test.cpu().numpy(),
+        'X_train': X_train.cpu().numpy(),
+        'y_train': y_train.cpu().numpy(),
         
         # 将原来的训练结果嵌套在一个新的键 'train_results' 中
         'train_results': {
