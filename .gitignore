@@ -5,3 +5,4 @@ demo.ipynb
 .gitignore
 softplus_activation/
 test_results/
+run_period/experiment_results*
