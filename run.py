@@ -26,14 +26,21 @@ LEARNING_RATE = 0.01
 EPOCHS_LIST = [100, 1000, 10000] # 实验不同训练时长的影响
 epochs = EPOCHS_LIST[-1]
 
+# --- 定义感兴趣的width列表 ---
+WIDTH_LIST = np.array([0.1250, 0.25, 0.5, 1., 1.5, 2, 3, 4])
+TAGET_WIDTH = WIDTH_LIST * np.pi
+
+# ---根据width计算beta---
+BETA_FROM_WIDTH = np.abs(np.log(np.sqrt(2)-1)) / TAGET_WIDTH
+print(BETA_FROM_WIDTH)
+
+
 # --- 实验核心：β 扫描列表 ---
 # 定义当前要使用的 BETA 列表
-BETA_VISUALIZE = [0.5,1,2,4,8,10,20,50] # 指定需要可视化拟合曲线的beta值
-BETA_BASE = [0.5,1,2,4,8,10,20,50]
-BETA_TO_RUN = sorted(list(set(BETA_BASE + BETA_VISUALIZE))) # 合并并排序
+BETA_TO_RUN = BETA_FROM_WIDTH.tolist()
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v2")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v3")
 # # 设置随机种子以保证结果可复现
 # torch.manual_seed(52)
 # np.random.seed(52)
@@ -137,7 +144,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
             print(f"Epoch [{epoch}/{epochs}], n={n}, beta={beta}, seed={seed} Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
 
         # 如果当前轮次是epochlist中的一个元素
-        if epoch + 1 in EPOCHS_LIST and beta in BETA_VISUALIZE:
+        if epoch + 1 in EPOCHS_LIST:
             # 计算当前轮次的预测值
             model.eval()
             with torch.no_grad():
@@ -196,6 +203,7 @@ if __name__ == "__main__":
     # 调整results结构以容纳epochs, mean_std, 和 std_of_stds
     results = {
         # 直接将测试数据存进去 (注意从Tensor转为Numpy array)
+        'width_list': TAGET_WIDTH,
         'X_test': X_test.cpu().numpy(),
         'y_test': y_test.cpu().numpy(),
         'X_train': X_train.cpu().numpy(),
@@ -207,7 +215,7 @@ if __name__ == "__main__":
                 n: {
                     beta: {
                         seed: {'y_pred_std': None, 'y_pred': None} for seed in SEED_LIST
-                    } for beta in BETA_VISUALIZE
+                    } for beta in BETA_TO_RUN
                 } for n in N_NEURONS_LIST
             } for epochs in EPOCHS_LIST
         }
