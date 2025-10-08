@@ -191,8 +191,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, b
 # ==============================================================================
 # 5. 主实验流程 (Main Experiment Logic)
 # ==============================================================================
-
-if __name__ == "__main__":
+def main():
     # 创建输出目录
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -246,3 +245,6 @@ if __name__ == "__main__":
     # 将results保存为pickle文件
     with open(os.path.join(OUTPUT_DIR, f'results.pkl'), 'wb') as f:
         pickle.dump(results, f)
+
+if __name__ == "__main__":
+    main()

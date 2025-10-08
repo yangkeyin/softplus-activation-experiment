@@ -11,7 +11,7 @@ import numpy as np
 numpoints = 1000
 x = torch.linspace(-4*np.pi, 4*np.pi, numpoints)
 # 选择一组合适的beta和threshold值
-beta = [0.5,1,2,5,8,10,20,30,40,50,100]
+beta = [2.24,1.12,0.56,0.28,0.19,0.14,0.09,0.07]
 threshold = [20,40,80,160]
 # 定义输出的目录
 output_dir = 'softplus_activation'  
