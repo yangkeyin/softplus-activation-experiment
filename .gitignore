@@ -8,3 +8,5 @@ test_results/
 run_period/experiment_results*
 optimizer*/
 read_pickle.py
+new*/
+test*/

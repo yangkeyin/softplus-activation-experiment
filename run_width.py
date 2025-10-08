@@ -20,23 +20,33 @@ NUM_POINTS = 1000
 TEST_SIZE = 0.2
 
 # --- 模型与训练参数 ---
-# 固定参数以隔离优化器的影响
-N_NEURONS = 128  # 固定为128神经元
-BETA = 2.0  # 固定为2
-EPOCHS = 10000  # 固定为1000轮次
+# n也作为一个变量进行测试
+N_NEURONS_LIST = [32, 64, 128, 512]  # 您可以修改或增加神经元数量的测试列表
+LEARNING_RATE = 0.01
+EPOCHS_LIST = [100, 1000, 10000] # 实验不同训练时长的影响
+epochs = EPOCHS_LIST[-1]
 
-# --- 优化器和学习率配置 ---
-OPTIMIZERS = ['Adam', 'SGD']  # 优化器列表
-LEARNING_RATES = {
-    'Adam': [0.01, 0.001],
-    'SGD': [0.1, 0.01, 0.001]
-}  # 每个优化器对应的学习率列表
+# --- 定义感兴趣的width列表 ---
+WIDTH_LIST = np.array([0.1250, 0.25, 0.5, 1., 1.5, 2, 3, 4])
+TAGET_WIDTH = WIDTH_LIST * np.pi
+
+# ---根据width计算beta---
+BETA_FROM_WIDTH = np.abs(np.log(np.sqrt(2)-1)) / TAGET_WIDTH
+print(BETA_FROM_WIDTH)
+
+
+# --- 实验核心：β 扫描列表 ---
+# 定义当前要使用的 BETA 列表
+BETA_TO_RUN = BETA_FROM_WIDTH.tolist()
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "optimizer_EPOCH10000")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v3")
+# # 设置随机种子以保证结果可复现
+# torch.manual_seed(52)
+# np.random.seed(52)
 
 # --- 统计稳定性测试参数 ---
-SEED_LIST = [42, 38, 50, 100]  # 使用多个随机种子进行重复实验
+SEED_LIST = [42,38,50,100]  # 使用多个随机种子进行重复实验
 
 # ==============================================================================
 # 2. 模型定义 (Model Definition)
@@ -89,7 +99,7 @@ def generate_data(data_range, num_points, test_size):
 # 4. 训练与评估函数 (Training and Evaluation Function)
 # ==============================================================================
 
-def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, lr, epochs, n, beta, output_dir):
+def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, beta, output_dir):
     """
     训练模型，评估并绘制损失曲线
     Args:
@@ -98,7 +108,6 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
         y_train (torch.Tensor): 训练集标签
         X_test (torch.Tensor): 测试集输入
         y_test (torch.Tensor): 测试集标签
-        optimizer_name (str): 优化器名称
         lr (float): 学习率
         epochs (int): 训练轮数
         n (int): 模型神经元数量
@@ -107,18 +116,9 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
     Returns:
         std_dev (float): 测试集上的误差标准差
         y_pred (torch.Tensor): 模型在测试集上的预测值
-        train_losses (list): 训练损失历史
-        val_losses (list): 验证损失历史
     """
     criterion = nn.MSELoss()  # 均方误差损失函数
-    
-    # 根据optimizer_name选择不同的优化器
-    if optimizer_name == 'Adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    elif optimizer_name == 'SGD':
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     train_losses = []
     val_losses = []
@@ -131,7 +131,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
         loss.backward()
         optimizer.step()
         
-        # 每隔10轮记录一次损失
+        # 每隔10轮记录一次损失和准确率
         if epoch % 10 == 0:
             train_losses.append(loss.item())
             
@@ -141,7 +141,18 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
                 val_loss = criterion(val_outputs, y_test)
                 val_losses.append(val_loss.item())
 
-            print(f"Epoch [{epoch}/{epochs}], optimizer={optimizer_name}, lr={lr}, seed={seed} Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
+            print(f"Epoch [{epoch}/{epochs}], n={n}, beta={beta}, seed={seed} Train Loss: {loss.item():.6f}, Val Loss: {val_loss.item():.6f}")
+
+        # 如果当前轮次是epochlist中的一个元素
+        if epoch + 1 in EPOCHS_LIST:
+            # 计算当前轮次的预测值
+            model.eval()
+            with torch.no_grad():
+                y_pred = model(X_test)
+                error = y_test - y_pred
+                std_dev = error.std().item()
+                results['train_results'][epoch + 1][n][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
+                results['train_results'][epoch + 1][n][beta][seed]['y_pred_std'] = std_dev
 
     # --- 绘制并保存当前参数下的损失曲线 ---
     epochs_recorded = np.arange(len(train_losses)) * 10 
@@ -149,7 +160,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
     ax = plt.gca()
     ax.plot(epochs_recorded, train_losses, label='Train Loss')
     ax.plot(epochs_recorded, val_losses, label='Validation Loss')
-    ax.set_title(f'Loss Curve for {optimizer_name}, lr={lr}, seed={seed}')
+    ax.set_title(f'Loss Curve for n={n}, beta={beta}')
     ax.set_xlabel('Epochs')
     ax.set_ylabel('MSE')
     ax.set_yscale('log')
@@ -163,7 +174,7 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
     ax.yaxis.set_minor_locator(NullLocator())
     ax.legend()
     ax.grid(True)
-    loss_curve_path = os.path.join(output_dir, f'loss_curve_{optimizer_name}_lr{lr}_seed{seed}.png')
+    loss_curve_path = os.path.join(output_dir, f'loss_curve_n{n}_beta{beta}.png')
     ax.figure.savefig(loss_curve_path)
     plt.close(ax.figure)
     
@@ -174,14 +185,13 @@ def train_and_evaluate(model, X_train, y_train, X_test, y_test, optimizer_name, 
         error = y_test - y_pred
         std_dev = error.std().item()
         
-    return std_dev, y_pred, train_losses, val_losses
+    return std_dev, y_pred
 
 
 # ==============================================================================
 # 5. 主实验流程 (Main Experiment Logic)
 # ==============================================================================
-
-if __name__ == "__main__":
+def main():
     # 创建输出目录
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -189,60 +199,52 @@ if __name__ == "__main__":
     # 生成数据
     X_train, y_train, X_test, y_test = generate_data(DATA_RANGE, NUM_POINTS, TEST_SIZE)
     
-    # 调整results结构以容纳不同优化器和学习率的结果
+    # 调整results结构以容纳epochs, mean_std, 和 std_of_stds
     results = {
         # 直接将测试数据存进去 (注意从Tensor转为Numpy array)
+        'width_list': TAGET_WIDTH,
         'X_test': X_test.cpu().numpy(),
         'y_test': y_test.cpu().numpy(),
         'X_train': X_train.cpu().numpy(),
         'y_train': y_train.cpu().numpy(),
-        'fixed_params': {
-            'n_neurons': N_NEURONS,
-            'beta': BETA,
-            'epochs': EPOCHS
-        },
-        # 存储不同优化器和学习率的结果
-        'optimizer_results': {}
+        
+        # 将原来的训练结果嵌套在一个新的键 'train_results' 中
+        'train_results': {
+            epochs: {
+                n: {
+                    beta: {
+                        seed: {'y_pred_std': None, 'y_pred': None} for seed in SEED_LIST
+                    } for beta in BETA_TO_RUN
+                } for n in N_NEURONS_LIST
+            } for epochs in EPOCHS_LIST
+        }
     }
-    
-    # 为每个优化器创建子目录
-    for optimizer_name in OPTIMIZERS:
-        optimizer_dir = os.path.join(OUTPUT_DIR, optimizer_name)
-        if not os.path.exists(optimizer_dir):
-            os.makedirs(optimizer_dir)
+    for n in N_NEURONS_LIST:
+        print(f"\n{'='*20} Starting Experiment for n = {n} Neurons {'='*20}")
         
-        results['optimizer_results'][optimizer_name] = {}
-        
-        # 遍历当前优化器的所有学习率
-        for lr in LEARNING_RATES[optimizer_name]:
-            print(f"\n{'='*20} Starting Experiment for {optimizer_name}, lr={lr} {'='*20}")
-            
-            results['optimizer_results'][optimizer_name][lr] = {}
-            
+        for beta in BETA_TO_RUN:
+            print(f"\n--- Training with n={n}, beta={beta} ---")
+
             for seed in SEED_LIST:
                 # 设置随机种子
-                print(f"Setting seed to {seed} for {optimizer_name}, lr={lr}")
+                print(f"Setting seed to {seed} for n={n}, beta={beta}")
                 torch.manual_seed(seed)
                 np.random.seed(seed)
             
                 # 实例化模型
-                model = SimpleMLP(n_neurons=N_NEURONS, beta=BETA).to(DEVICE)
+                model = SimpleMLP(n_neurons=n, beta=beta).to(DEVICE)
                 
                 # 训练和评估
-                std_dev, y_pred, train_losses, val_losses = train_and_evaluate(
-                    model, X_train, y_train, X_test, y_test, optimizer_name, lr, EPOCHS, N_NEURONS, BETA, optimizer_dir
+                std_dev, y_pred = train_and_evaluate(
+                    model, X_train, y_train, X_test, y_test, LEARNING_RATE, epochs, n, beta, OUTPUT_DIR
                 )
 
-                # 存储结果
-                results['optimizer_results'][optimizer_name][lr][seed] = {
-                    'y_pred_std': std_dev,
-                    'y_pred': y_pred.cpu().numpy().flatten(),
-                    'train_losses': train_losses,
-                    'val_losses': val_losses
-                }
+                print(f"--- Result for n={n}, beta={beta}, seed={seed}: std(y_err) = {std_dev:.6f} ---")
 
-                print(f"--- Result for {optimizer_name}, lr={lr}, seed={seed}: std(y_err) = {std_dev:.6f} ---")
 
     # 将results保存为pickle文件
-    with open(os.path.join(OUTPUT_DIR, 'optimizer_results.pkl'), 'wb') as f:
+    with open(os.path.join(OUTPUT_DIR, f'results.pkl'), 'wb') as f:
         pickle.dump(results, f)
+
+if __name__ == "__main__":
+    main()
