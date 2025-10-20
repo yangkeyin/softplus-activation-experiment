@@ -1,254 +1,251 @@
 import pickle
-import os
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FormatStrFormatter, NullLocator
+import matplotlib.pyplot as plt
+import os
 
-# 设置中文字体支持
-plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC", "sans-serif"]
-# 设置负号正确显示
-plt.rcParams["axes.unicode_minus"] = False
+# ==============================================================================
+# 1. 配置参数 (Configuration)
+# ==============================================================================
+# 输入的 pickle 文件路径
+RESULTS_PKL_PATH = os.path.join(os.path.dirname(__file__), "../results/optmizier/1020_optimizer_AdamAndSGD_sinxADDsin5x/optimizer_results.pkl")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/optmizier/1020_optimizer_AdamAndSGD_sinxADDsin5x/analysis_plots")
+# ==============================================================================
+# 2. 绘图函数 (全部更新)
+# ==============================================================================
 
-# 定义输出目录
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "optimizer_EPOCH10000")
-COMPARISON_DIR = os.path.join(OUTPUT_DIR, "comparisons")
+def get_color_map(optimizer_results):
+    """
+    为每个 (优化器, 学习率) 组合生成一个唯一的颜色映射。
+    """
+    all_configs = []
+    # 从结果中提取所有独特的 (optimizer, lr) 组合
+    for epoch_val, optimizer_data in optimizer_results.items():
+        for optimizer_name, lr_data in optimizer_data.items():
+            for lr in lr_data.keys():
+                if (optimizer_name, lr) not in all_configs:
+                    all_configs.append((optimizer_name, lr))
+    
+    # 使用 matplotlib 的 tab10 颜色方案
+    color_cycle = plt.cm.tab10(np.linspace(0, 1, len(all_configs)))
+    color_map = {config: color for config, color in zip(all_configs, color_cycle)}
+    return color_map
 
-
-def plot_all_loss_curves_comparison(results):
-    """绘制所有优化器和学习率的损失曲线对比图"""
-    if not os.path.exists(COMPARISON_DIR):
-        os.makedirs(COMPARISON_DIR)
-    
-    # 创建训练损失对比图
-    fig_train, ax_train = plt.subplots(figsize=(14, 10))
-    
-    # 创建验证损失对比图
-    fig_val, ax_val = plt.subplots(figsize=(14, 10))
-    
-    # 为不同的优化器和学习率组合准备不同的颜色和线条样式
-    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    linestyles = ['-', '--', '-.', ':']
-    line_idx = 0
-    
-    # 遍历所有优化器和学习率
-    for optimizer_name in results['optimizer_results'].keys():
-        for lr in results['optimizer_results'][optimizer_name].keys():
-            # 计算所有种子的平均训练损失和验证损失
-            all_train_losses = []
-            all_val_losses = []
-            
-            for seed in results['optimizer_results'][optimizer_name][lr].keys():
-                all_train_losses.append(results['optimizer_results'][optimizer_name][lr][seed]['train_losses'])
-                all_val_losses.append(results['optimizer_results'][optimizer_name][lr][seed]['val_losses'])
-            
-            # 计算平均值
-            mean_train_losses = np.mean(all_train_losses, axis=0)
-            mean_val_losses = np.mean(all_val_losses, axis=0)
-            # 为了防止log(0)或log(负数)的错误，我们将所有非正数的值替换为一个非常小的正数
-            # 比如 1e-8 (0.00000001)，这样既不影响图形的整体趋势，又能保证绘图成功。
-            safe_mean_train_losses = np.clip(mean_train_losses, a_min=1e-8, a_max=None)
-            safe_mean_val_losses = np.clip(mean_val_losses, a_min=1e-8, a_max=None)
-            
-            # 生成epochs序列
-            epochs_recorded = np.arange(len(mean_train_losses)) * 10
-            
-            # 获取颜色和线条样式
-            color = color_cycle[line_idx % len(color_cycle)]
-            linestyle = linestyles[line_idx % len(linestyles)]
-            line_idx += 1
-            
-            # 绘制训练损失曲线
-            label = f"{optimizer_name}, lr={lr}"
-            ax_train.plot(epochs_recorded, safe_mean_train_losses, label=label, color=color, linestyle=linestyle, linewidth=2)
-            
-            # 绘制验证损失曲线
-            ax_val.plot(epochs_recorded, safe_mean_val_losses, label=label, color=color, linestyle=linestyle, linewidth=2)
-    
-    # 设置训练损失对比图的属性
-    ax_train.set_title(f'所有优化器和学习率的训练损失曲线对比 (Neurons={results["fixed_params"]["n_neurons"]}, Beta={results["fixed_params"]["beta"]})')
-    ax_train.set_xlabel('Epochs')
-    ax_train.set_ylabel('MSE')
-    ax_train.set_yscale('log')
-    ax_train.legend(loc='best', ncol=2)
-    ax_train.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(COMPARISON_DIR, 'all_train_losses_comparison.png'))
-    plt.close(fig_train)
-    
-    # 设置验证损失对比图的属性
-    ax_val.set_title(f'所有优化器和学习率的验证损失曲线对比 (Neurons={results["fixed_params"]["n_neurons"]}, Beta={results["fixed_params"]["beta"]})')
-    ax_val.set_xlabel('Epochs')
-    ax_val.set_ylabel('MSE')
-    ax_val.set_yscale('log')
-    ax_val.legend(loc='best', ncol=2)
-    ax_val.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(COMPARISON_DIR, 'all_val_losses_comparison.png'))
-    plt.close(fig_val)
-
-
-def plot_optimizer_lr_grouped_loss_comparison(results):
-    """按优化器分组绘制损失曲线对比图，便于比较相同优化器下不同学习率的效果"""
-    if not os.path.exists(COMPARISON_DIR):
-        os.makedirs(COMPARISON_DIR)
-    
-    # 为每个优化器创建单独的损失曲线对比图
-    for optimizer_name in results['optimizer_results'].keys():
-        plt.figure(figsize=(12, 8))
-        ax = plt.gca()
-        
-        # 获取该优化器的所有学习率
-        lrs = results['optimizer_results'][optimizer_name].keys()
-        
-        # 为不同的学习率准备不同的颜色
-        color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
-        
-        # 遍历所有学习率
-        for i, lr in enumerate(lrs):
-            # 计算所有种子的平均训练损失和验证损失
-            all_train_losses = []
-            all_val_losses = []
-            
-            for seed in results['optimizer_results'][optimizer_name][lr].keys():
-                all_train_losses.append(results['optimizer_results'][optimizer_name][lr][seed]['train_losses'])
-                all_val_losses.append(results['optimizer_results'][optimizer_name][lr][seed]['val_losses'])
-            
-            # 计算平均值
-            mean_train_losses = np.mean(all_train_losses, axis=0)
-            mean_val_losses = np.mean(all_val_losses, axis=0)
-            
-            # 生成epochs序列
-            epochs_recorded = np.arange(len(mean_train_losses)) * 10
-            
-            # 获取颜色
-            color = color_cycle[i % len(color_cycle)]
-            
-            # 绘制训练和验证损失曲线
-            ax.plot(epochs_recorded, mean_train_losses, label=f'lr={lr} (Train)', color=color, linestyle='-', linewidth=2)
-            ax.plot(epochs_recorded, mean_val_losses, label=f'lr={lr} (Val)', color=color, linestyle='--', linewidth=2)
-        
-        # 设置图表属性
-        ax.set_title(f'{optimizer_name} 优化器不同学习率的损失曲线对比 (Neurons={results["fixed_params"]["n_neurons"]}, Beta={results["fixed_params"]["beta"]})')
-        ax.set_xlabel('Epochs')
-        ax.set_ylabel('MSE')
-        ax.set_yscale('log')
-        ax.legend(loc='best')
-        ax.grid(True)
-        plt.tight_layout()
-        plt.savefig(os.path.join(COMPARISON_DIR, f'{optimizer_name}_loss_comparison.png'))
-        plt.close()
-
-def plot_loss_comparison(results):
-    """绘制不同优化器和学习率的最终误差标准差箱型图"""
-    if not os.path.exists(COMPARISON_DIR):
-        os.makedirs(COMPARISON_DIR)
-    
-    # 创建一个箱型图
-    plt.figure(figsize=(12, 8))
-    ax = plt.gca()
-    
-    # 准备数据和标签
-    data = []
-    labels = []
-    
-    # 为每个优化器和学习率组合收集数据
-    for optimizer_name in results['optimizer_results'].keys():
-        for lr in results['optimizer_results'][optimizer_name].keys():
-            # 收集所有种子的预测标准差
-            std_devs = [results['optimizer_results'][optimizer_name][lr][seed]['y_pred_std']
-                        for seed in results['optimizer_results'][optimizer_name][lr].keys()]
-            data.append(std_devs)
-            labels.append(f"{optimizer_name}, lr={lr}")
-    
-    # 绘制箱型图
-    ax.boxplot(data, labels=labels, showfliers=True)
-    
-    ax.set_title('不同优化器和学习率的最终误差标准差箱型图')
-    ax.set_ylabel('最终误差标准差')
-    ax.set_yscale('log')
-    ax.tick_params(axis='x', rotation=90)
-    ax.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(COMPARISON_DIR, 'optimizer_lr_std_comparison.png'))
-    plt.close()
-
-def plot_function_comparison(results):
-    """绘制不同优化器和学习率的拟合函数对比图"""
-    if not os.path.exists(COMPARISON_DIR):
-        os.makedirs(COMPARISON_DIR)
-    
-    x_test = results['X_test']
+def plot_fitting_function_comparison(results, base_output_dir, color_map):
+    """
+    为每个epoch绘制一张汇总的拟合函数对比图。
+    图中包含所有优化器和学习率组合的结果。
+    不同seed的结果用浅色表示，其平均值用深色实线表示。
+    """
+    print("Generating summarized fitting function comparison plots...")
+    X_test = results['X_test']
     y_test = results['y_test']
-    x_train = results['X_train']
-    y_train = results['y_train']
+    sorted_indices = np.argsort(X_test.flatten())
+    X_test_sorted = X_test[sorted_indices]
+    y_test_sorted = y_test[sorted_indices]
+
+    optimizer_results = results['optimizer_results']
+
+    # 按 Epoch 循环，为每个 Epoch 生成一张图
+    for epoch_val, optimizer_data in optimizer_results.items():
+        epoch_dir = os.path.join(base_output_dir, f"epoch_{epoch_val}")
+        os.makedirs(epoch_dir, exist_ok=True)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12), sharex=True)
+
+        # 绘制一次真实函数和误差参考线
+        ax1.plot(X_test_sorted, y_test_sorted, 'k--', linewidth=2, label='True Function (sin(x))')
+        ax2.axhline(0, color='black', linestyle='--', linewidth=0.8)
+
+        # 遍历该 Epoch 下的所有实验配置
+        for optimizer_name, lr_data in optimizer_data.items():
+            for lr, seed_data in lr_data.items():
+                
+                color = color_map[(optimizer_name, lr)]
+                
+                # 收集当前配置下所有 seed 的数据
+                preds_from_seeds = []
+                errors_from_seeds = []
+                for seed, seed_result in seed_data.items():
+                    y_pred_sorted = seed_result['y_pred'][sorted_indices]
+                    preds_from_seeds.append(y_pred_sorted)
+                    errors_from_seeds.append(y_test_sorted.flatten() - y_pred_sorted.flatten())
+                
+                if not preds_from_seeds:
+                    continue
+
+                # 绘制每个 seed 的浅色背景线
+                for i in range(len(preds_from_seeds)):
+                    label_ind = "Individual Seeds" if i == 0 and optimizer_name == list(optimizer_data.keys())[0] else None
+                    ax1.plot(X_test_sorted, preds_from_seeds[i], color=color, alpha=0.2, label=label_ind)
+                    ax2.plot(X_test_sorted, errors_from_seeds[i], color=color, alpha=0.2)
+                
+                # 计算平均值并绘制深色实线
+                if len(preds_from_seeds) > 0:
+                    mean_pred = np.mean(preds_from_seeds, axis=0)
+                    mean_error = np.mean(errors_from_seeds, axis=0)
+                    
+                    label_avg = f'Avg - {optimizer_name} LR={lr}'
+                    ax1.plot(X_test_sorted, mean_pred, color=color, linewidth=2.5, label=label_avg)
+                    ax2.plot(X_test_sorted, mean_error, color=color, linewidth=2.5)
+
+        # 设置图像属性并保存
+        ax1.set_ylabel('Value')
+        ax1.set_title(f'Aggregated Fit Comparison\nEpoch: {epoch_val}')
+        ax1.legend(loc='upper right')
+        ax1.grid(True, which="both", ls="--", linewidth=0.5)
+
+        ax2.set_xlabel('x')
+        ax2.set_ylabel('Prediction Error (True - Pred)')
+        ax2.grid(True, which="both", ls="--", linewidth=0.5)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        filename = f"fit_comparison_summary_epoch_{epoch_val}.png"
+        filepath = os.path.join(epoch_dir, filename)
+        plt.savefig(filepath, dpi=150)
+        plt.close(fig)
+        
+    print("Done.")
+
+
+def plot_fitting_function_frequency_comparison(results, base_output_dir, color_map):
+    """
+    为每个epoch绘制一张汇总的频域对比图。
+    (此函数已在上一轮修改，此处保持更新后的版本)
+    """
+    print("Generating summarized frequency domain comparison plots...")
+    true_coeffs = results['true_coeffs']
+    k = np.arange(len(true_coeffs))
+    optimizer_results = results['optimizer_results']
+
+    for epoch_val, optimizer_data in optimizer_results.items():
+        epoch_dir = os.path.join(base_output_dir, f"epoch_{epoch_val}")
+        os.makedirs(epoch_dir, exist_ok=True)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12), sharex=True)
+        ax1.semilogy(k, np.abs(true_coeffs), 'k--', linewidth=2, label='True Coefficients (sin(x))')
+
+        for optimizer_name, lr_data in optimizer_data.items():
+            for lr, seed_data in lr_data.items():
+                color = color_map[(optimizer_name, lr)]
+                coeffs_from_seeds = []
+                errors_from_seeds = []
+                for seed_result in seed_data.values():
+                    ann_coeffs = seed_result['coeffs']
+                    coeffs_from_seeds.append(np.abs(ann_coeffs))
+                    errors_from_seeds.append(np.abs(true_coeffs - ann_coeffs))
+                if not coeffs_from_seeds: continue
+                for i in range(len(coeffs_from_seeds)):
+                    label_ind = "Individual Seeds" if i == 0 and optimizer_name == list(optimizer_data.keys())[0] else None
+                    ax1.semilogy(k, coeffs_from_seeds[i], color=color, alpha=0.2, label=label_ind)
+                    ax2.semilogy(k, errors_from_seeds[i], color=color, alpha=0.2)
+                mean_coeffs = np.mean(coeffs_from_seeds, axis=0)
+                mean_error = np.mean(errors_from_seeds, axis=0)
+                label_avg = f'Avg - {optimizer_name} LR={lr}'
+                ax1.semilogy(k, mean_coeffs, color=color, linewidth=2.5, label=label_avg)
+                ax2.semilogy(k, mean_error, color=color, linewidth=2.5)
+
+        ax1.set_ylabel('|Coefficient| (log scale)')
+        ax1.set_title(f'Aggregated Frequency Domain Comparison\nEpoch: {epoch_val}')
+        ax1.legend(loc='upper right')
+        ax1.grid(True, which="both", ls="--", linewidth=0.5)
+        ax2.set_xlabel('Frequency Index (k)')
+        ax2.set_ylabel('|Coefficient Error| (log scale)')
+        ax2.grid(True, which="both", ls="--", linewidth=0.5)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        filename = f"freq_comparison_summary_epoch_{epoch_val}.png"
+        filepath = os.path.join(epoch_dir, filename)
+        plt.savefig(filepath, dpi=150)
+        plt.close(fig)
+    print("Done.")
+
+
+def plot_all_std_dev_comparison(results, base_output_dir, color_map):
+    """
+    绘制一张折线图，展示不同实验配置的误差标准差随epoch的变化趋势。
+    """
+    print("Generating standard deviation evolution plot...")
     
-    # 对x_test进行排序以便绘制连续曲线
-    sort_indices = np.argsort(x_test.flatten())
-    x_test_sorted = x_test[sort_indices]
-    y_test_sorted = y_test[sort_indices]
+    optimizer_results = results['optimizer_results']
     
-    # 创建拟合函数对比图
-    plt.figure(figsize=(12, 8))
-    ax = plt.gca()
+    fig, ax = plt.subplots(figsize=(12, 8))
     
-    # 绘制真实函数和数据点
-    ax.plot(x_test_sorted, y_test_sorted, 'k-', label='真实函数 sin(x)')
-    ax.scatter(x_test, y_test, label='测试数据', color='green', s=10, alpha=0.5)
-    ax.scatter(x_train, y_train, label='训练数据', color='black', marker='x', s=10, alpha=0.4)
-    
-    # 为每个优化器和学习率组合绘制平均预测曲线
-    for optimizer_name in results['optimizer_results'].keys():
-        for lr in results['optimizer_results'][optimizer_name].keys():
-            # 计算所有种子的平均预测值
-            y_preds = [results['optimizer_results'][optimizer_name][lr][seed]['y_pred'][sort_indices]
-                      for seed in results['optimizer_results'][optimizer_name][lr].keys()]
-            mean_y_pred = np.mean(y_preds, axis=0)
+    all_epochs = sorted(list(optimizer_results.keys()))
+
+    # 遍历每种 (优化器, 学习率) 组合
+    for (optimizer_name, lr), color in color_map.items():
+        
+        mean_stds_over_epochs = []
+        std_of_stds_over_epochs = []
+        valid_epochs = []
+
+        # 遍历所有epoch，为当前配置收集数据
+        for epoch in all_epochs:
+            if optimizer_name in optimizer_results[epoch] and lr in optimizer_results[epoch][optimizer_name]:
+                seed_data = optimizer_results[epoch][optimizer_name][lr]
+                stds_for_current_config = [res['y_pred_std'] for res in seed_data.values()]
+                
+                if stds_for_current_config:
+                    valid_epochs.append(epoch)
+                    mean_stds_over_epochs.append(np.mean(stds_for_current_config))
+                    std_of_stds_over_epochs.append(np.std(stds_for_current_config))
+        
+        if not valid_epochs:
+            continue
             
-            # 计算平均预测的标准差
-            std_devs = [results['optimizer_results'][optimizer_name][lr][seed]['y_pred_std']
-                        for seed in results['optimizer_results'][optimizer_name][lr].keys()]
-            mean_std_dev = np.mean(std_devs)
-            
-            label = f"{optimizer_name}, lr={lr} (std: {mean_std_dev:.6f})"
-            line = ax.plot(x_test_sorted, mean_y_pred, label=label)[0]
-            
-            # 绘制平均预测值的点
-            ax.scatter(x_test_sorted, mean_y_pred, s=10, alpha=0.5, color=line.get_color())
+        mean_stds_over_epochs = np.array(mean_stds_over_epochs)
+        std_of_stds_over_epochs = np.array(std_of_stds_over_epochs)
+        
+        # 绘制平均值折线
+        label = f'{optimizer_name} LR={lr}'
+        ax.plot(valid_epochs, mean_stds_over_epochs, marker='o', linestyle='-', color=color, label=label)
+        
+        # 使用 fill_between 展示稳定性（标准差范围）
+        ax.fill_between(valid_epochs, 
+                        mean_stds_over_epochs - std_of_stds_over_epochs,
+                        mean_stds_over_epochs + std_of_stds_over_epochs,
+                        color=color, alpha=0.2)
+
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Mean std(y_true - y_pred) (log scale)')
+    ax.set_title('Evolution of Prediction Error Standard Deviation')
+    ax.set_yscale('log')
+    ax.set_xticks(all_epochs) # 确保所有epoch点都在x轴上显示
+    ax.legend()
+    ax.grid(True, which="both", ls="--", linewidth=0.5)
     
-    ax.set_title(f'不同优化器和学习率的拟合函数对比 (Neurons={results["fixed_params"]["n_neurons"]}, Beta={results["fixed_params"]["beta"]}, Epochs={results["fixed_params"]["epochs"]})')
-    ax.set_xlabel('x')
-    ax.set_ylabel('预测值')
-    ax.legend(loc='best')
-    ax.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(COMPARISON_DIR, 'function_fitting_comparison.png'))
-    plt.close()
+    filepath = os.path.join(base_output_dir, "std_dev_evolution.png")
+    plt.savefig(filepath, dpi=150)
+    plt.close(fig)
+    print("Done.")
 
 
+# ==============================================================================
+# 3. 主执行流程
+# ==============================================================================
 def main():
-    # 加载结果数据
-    results_path = os.path.join(OUTPUT_DIR, 'optimizer_results.pkl')
-    if not os.path.exists(results_path):
-        print(f"错误: 结果文件 {results_path} 不存在。请先运行run.py。")
+    """
+    主函数，加载数据并调用所有更新后的绘图函数。
+    """
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    try:
+        with open(RESULTS_PKL_PATH, 'rb') as f:
+            results = pickle.load(f)
+        print(f"Successfully loaded results from '{RESULTS_PKL_PATH}'")
+    except FileNotFoundError:
+        print(f"Error: Results file not found at '{RESULTS_PKL_PATH}'")
         return
+        
+    # 首先生成颜色映射，确保所有图表颜色一致
+    color_map = get_color_map(results['optimizer_results'])
     
-    with open(results_path, 'rb') as f:
-        results = pickle.load(f)
+    # 调用所有绘图函数
+    plot_fitting_function_comparison(results, OUTPUT_DIR, color_map)
+    plot_fitting_function_frequency_comparison(results, OUTPUT_DIR, color_map)
+    plot_all_std_dev_comparison(results, OUTPUT_DIR, color_map)
     
-    print("开始生成优化器和学习率对比图...")
-    
-    # 绘制所有损失曲线对比图
-    plot_all_loss_curves_comparison(results)
-    
-    # 按优化器分组绘制损失曲线对比图
-    plot_optimizer_lr_grouped_loss_comparison(results)
-    
-    # 绘制拟合函数对比图
-    plot_function_comparison(results)
-    
-    
-    print("所有对比图已生成并保存到:", COMPARISON_DIR)
-
+    print(f"\nAll summary plots have been saved to '{OUTPUT_DIR}'")
 
 if __name__ == "__main__":
     main()
