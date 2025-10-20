@@ -53,8 +53,8 @@ if __name__ == '__main__':
                 ax_fit.scatter(x_test, y_preds, s=10, alpha=0.5)
 
                 # 绘制neuron-error图
-                abs_error = y_preds - y_test.flatten()
-                ax_error.plot(x_test, abs_error, label=f'beta={beta}')
+                error = y_preds - y_test.flatten()
+                ax_error.plot(x_test, error, label=f'beta={beta}')
 
             ax_fit.set_title(f'Neuron {n} - Epoch {epoch}')
             ax_fit.set_xlabel('x')
@@ -63,9 +63,9 @@ if __name__ == '__main__':
             fig_fit.savefig(os.path.join(epoch_dir, f'neuron_{n}.png'))
             plt.close(fig_fit)
 
-            ax_error.set_title(f'Absolute Error for Neuron {n} - Epoch {epoch}')
+            ax_error.set_title(f'Error for Neuron {n} - Epoch {epoch}')
             ax_error.set_xlabel('Test x')
-            ax_error.set_ylabel('Absolute Error')
+            ax_error.set_ylabel('Error')
             ax_error.legend()
             fig_error.savefig(os.path.join(epoch_dir, f'neuron_{n}_error.png'))
             plt.close(fig_error)

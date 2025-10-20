@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FormatStrFormatter, NullLocator
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_v3")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "test_results_beta_1")
 
 # --- 重构思路：将两种分析模式封装到独立的函数中 ---
 
@@ -61,8 +61,8 @@ def run_beta_analysis(results):
                 ax_fit.scatter(x_test, y_preds, s=10, alpha=0.5, color=line.get_color())
 
                 # 绘制neuron-error图
-                abs_error = np.abs(y_preds - y_test.flatten())
-                ax_error.plot(x_test, abs_error, color=line.get_color(), label=line.get_label())
+                error = y_preds - y_test.flatten()
+                ax_error.plot(x_test, error, color=line.get_color(), label=line.get_label())
 
             ax_fit.set_title(f'Neuron {n} - Epoch {epoch}')
             ax_fit.set_xlabel('x')
@@ -71,9 +71,9 @@ def run_beta_analysis(results):
             fig_fit.savefig(os.path.join(epoch_dir, f'neuron_{n}.png'))
             plt.close(fig_fit)
 
-            ax_error.set_title(f'Absolute Error for Neuron {n} - Epoch {epoch}')
+            ax_error.set_title(f'Error for Neuron {n} - Epoch {epoch}')
             ax_error.set_xlabel('Test x')
-            ax_error.set_ylabel('Absolute Error')
+            ax_error.set_ylabel('Error')
             ax_error.legend()
             fig_error.savefig(os.path.join(epoch_dir, f'neuron_{n}_error.png'))
             plt.close(fig_error)
@@ -165,8 +165,8 @@ def run_width_analysis(results):
                 ax_fit.scatter(x_test, y_preds, s=10, alpha=0.5, color=line.get_color())
 
                 # 绘制neuron-error图
-                abs_error = np.abs(y_preds - y_test.flatten())
-                ax_error.plot(x_test, abs_error, color=line.get_color(), label=line.get_label())
+                error = y_preds - y_test.flatten()
+                ax_error.plot(x_test, error, color=line.get_color(), label=line.get_label())
 
             ax_fit.set_title(f'Neuron {n} - Epoch {epoch}')
             ax_fit.set_xlabel('x')
@@ -175,9 +175,9 @@ def run_width_analysis(results):
             fig_fit.savefig(os.path.join(epoch_dir, f'neuron_{n}.png'))
             plt.close(fig_fit)
 
-            ax_error.set_title(f'Absolute Error for Neuron {n} - Epoch {epoch}')
+            ax_error.set_title(f'Error for Neuron {n} - Epoch {epoch}')
             ax_error.set_xlabel('Test x')
-            ax_error.set_ylabel('Absolute Error')
+            ax_error.set_ylabel('Error')
             ax_error.legend()
             fig_error.savefig(os.path.join(epoch_dir, f'neuron_{n}_error.png'))
             plt.close(fig_error)

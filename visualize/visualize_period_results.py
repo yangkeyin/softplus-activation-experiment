@@ -8,7 +8,7 @@ import math
 # ==============================================================================
 # 配置参数
 # ==============================================================================
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "experiment_results_period_Π_wide")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/period/1017_SmallPoint_WidePeriod_800FixedTrainPoints")
 
 # ==============================================================================
 # 周期分析函数
@@ -103,11 +103,14 @@ def create_prediction_plot(results, epoch, period, n, fixed_beta, epoch_dir):
     # 获取当前period值的测试数据（核心修改：使用period作为键）
     X_test_key = f'X_test_period_{period}'
     y_test_key = f'y_test_period_{period}'
+    X_train_key = f'X_train_period_{period}'
+    y_train_key = f'y_train_period_{period}'
     
     if X_test_key not in results or y_test_key not in results:
-        print(f"Warning: Data for period={period_in_pi:.2f}π not found in results.")
+        print(f"Warning: Test data for period={period_in_pi:.2f}π not found in results.")
         return
-    
+        
+    # 获取测试数据
     x_test = results[X_test_key]
     y_test = results[y_test_key]
     
@@ -115,12 +118,30 @@ def create_prediction_plot(results, epoch, period, n, fixed_beta, epoch_dir):
     sort_indices = np.argsort(x_test.flatten())
     x_test_sorted = x_test[sort_indices]
     y_test_sorted = y_test[sort_indices]
+
+    # 获取训练数据
+    X_train = results[X_train_key]
+    y_train = results[y_train_key]
+    # 排序训练数据
+    sort_indices_train = np.argsort(X_train.flatten())
+    X_train_sorted = X_train[sort_indices_train]
+    y_train_sorted = y_train[sort_indices_train]
     
     # 创建预测图
     fig_fit, ax_fit = plt.subplots(figsize=(10, 6))
+
+    # 绘制训练数据点的预测曲线
+    ax_fit.plot(X_train_sorted, y_train_sorted, label=f'Trainline sin({k:.2f}x) [Period={period_in_pi:.2f}π]')
+
+    # 绘制训练数据点
+    ax_fit.scatter(X_train_sorted, y_train_sorted, label='Train Data', color='green', s=20, alpha=0.7)
     # 从周期计算频率并显示
-    ax_fit.plot(x_test_sorted, y_test_sorted, label=f'sin({k:.2f}x) [Period={period_in_pi:.2f}π]')
-    ax_fit.scatter(x_test_sorted, y_test_sorted, label='Test Data', color='green', s=10, alpha=0.5)
+    ax_fit.plot(x_test_sorted, y_test_sorted, label=f'Testline')
+    
+    # 绘制测试数据点
+    ax_fit.scatter(x_test_sorted, y_test_sorted, label='Test Data', color='blue', s=10, alpha=0.5)
+    
+
     
     # 创建误差图
     fig_error, ax_error = plt.subplots(figsize=(10, 6))
@@ -134,21 +155,21 @@ def create_prediction_plot(results, epoch, period, n, fixed_beta, epoch_dir):
             y_pred_sorted = y_pred[sort_indices]
             all_y_preds.append(y_pred_sorted)
             
-            # 在误差图上绘制单个种子的绝对误差
-            abs_error = np.abs(y_pred_sorted - y_test_sorted.flatten())
-            ax_error.plot(x_test_sorted, abs_error, alpha=0.3, label=f'seed={seed}')
+            # 在误差图上绘制单个种子的误差
+            error = y_pred_sorted - y_test_sorted.flatten()
+            ax_error.plot(x_test_sorted, error, alpha=0.3, label=f'seed={seed}')
     
-    # 计算平均预测值和平均绝对误差
+    # 计算平均预测值和平均误差
     if all_y_preds:
         mean_y_pred = np.mean(all_y_preds, axis=0)
-        mean_abs_error = np.mean([np.abs(y_pred - y_test_sorted.flatten()) for y_pred in all_y_preds], axis=0)
+        mean_error = np.mean([y_pred - y_test_sorted.flatten() for y_pred in all_y_preds], axis=0)
         
         # 在预测图上绘制平均预测值
         line = ax_fit.plot(x_test_sorted, mean_y_pred, 'r-', linewidth=2)[0]
         ax_fit.scatter(x_test_sorted, mean_y_pred, s=10, alpha=0.5, color='red')
         
-        # 在误差图上绘制平均绝对误差
-        ax_error.plot(x_test_sorted, mean_abs_error, 'r-', linewidth=2, label='Mean Absolute Error')
+        # 在误差图上绘制平均误差
+        ax_error.plot(x_test_sorted, mean_error, 'r-', linewidth=2, label='Mean Error')
     
     # 配置预测图
     ax_fit.set_title(f'Neuron {n} - Period {period_in_pi:.2f}π (k={k:.2f}), Epoch {epoch}')
@@ -167,9 +188,9 @@ def create_prediction_plot(results, epoch, period, n, fixed_beta, epoch_dir):
     plt.close(fig_fit)
     
     # 配置误差图
-    ax_error.set_title(f'Absolute Error for Neuron {n} - Period {period_in_pi:.2f}π (k={k:.2f}), Epoch {epoch}')
+    ax_error.set_title(f'Error for Neuron {n} - Period {period_in_pi:.2f}π (k={k:.2f}), Epoch {epoch}')
     ax_error.set_xlabel('Test x')
-    ax_error.set_ylabel('Absolute Error')
+    ax_error.set_ylabel('Error')
     ax_error.legend()
     
     # 保存误差图
