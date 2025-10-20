@@ -6,15 +6,16 @@ import torch.nn as nn
 import numpy as np
 
 # 从我们拆分好的模块中导入
-from src.data_loader import generate_data
-from src.models import SimpleMLP # 假设还有其他模型
+from src.data_loader import generate_data, generate_inter_data, generate_outer_data, generate_2D_data
+from src.models import SimpleMLP, SimpleMLP2D # 假设还有其他模型
 from src.trainer import train_and_evaluate
 from src.utils import get_fq_coef, rescale
+from src.plothelper import plot_all
 
 # 动态加载配置
 # 这里可以用 argparse 让它更灵活，例如: python run_experiment.py --config=exp_sgd_lr_01
-config_module = importlib.import_module("configs.exp_sgd_lr_01")
-CFG = config_module.ExperimentConfig()
+config_module = importlib.import_module("configs.target2D")
+CFG = config_module.X2AddY2()
 
 
 def main():
@@ -22,13 +23,16 @@ def main():
     os.makedirs(CFG.OUTPUT_DIR, exist_ok=True)
 
     # 2. 生成数据 (可以从配置中读取目标函数)
-    X_train, y_train, X_test, y_test = generate_data(
-        CFG.DATA_RANGE, CFG.NUM_POINTS, CFG.TEST_SIZE, CFG.target_function, CFG.DEVICE
+    X_train, y_train, X_test, y_test = generate_2D_data(
+        CFG.DATA_RANGE, CFG.NUM_TRAIN_POINTS, CFG.NUM_TEST_POINTS, CFG.target_function, CFG.DEVICE
     )
     # 3. 计算目标函数的傅里叶系数
     # 归一化目标函数
-    normalized_target = lambda x: CFG.target_function(rescale(x, CFG.DATA_RANGE))
-    true_coeffs = get_fq_coef(normalized_target)
+    if CFG.DATA_DIMENSION == 1:
+        normalized_target = lambda x: CFG.target_function(rescale(x, CFG.DATA_RANGE))
+        true_coeffs = get_fq_coef(normalized_target)
+    else:
+        true_coeffs = None
     
     # ... 初始化 results 字典 ...
     results = {
@@ -63,6 +67,8 @@ def main():
             # 3. 动态选择和实例化模型
             if CFG.MODEL_NAME == 'SimpleMLP':
                 model = SimpleMLP(n_neurons=CFG.N_NEURONS, beta=beta).to(CFG.DEVICE)
+            elif CFG.MODEL_NAME == 'SimpleMLP2D':
+                model = SimpleMLP2D(n_neurons=CFG.N_NEURONS, beta=beta).to(CFG.DEVICE)
             # elif CFG.MODEL_NAME == 'AnotherModel':
             #     model = AnotherModel(...).to(CFG.DEVICE)
             else:
@@ -90,6 +96,11 @@ def main():
     # 6. 保存结果
     with open(os.path.join(CFG.OUTPUT_DIR, 'results.pkl'), 'wb') as f:
         pickle.dump(results, f)
+
+    
+    # visualize the results
+    plot_all(CFG.OUTPUT_DIR, CFG.DATA_DIMENSION)
+
 
 if __name__ == "__main__":
     main()

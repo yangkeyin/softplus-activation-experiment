@@ -65,9 +65,12 @@ def train_and_evaluate(model, optimizer, X_train, y_train, X_test, y_test, confi
                 results['train_results'][epoch + 1][beta][seed]['y_pred_std'] = std_dev
 
                 # 记录当前轮次的频域
-                f_ann = lambda x_norm: model(torch.FloatTensor(rescale(x_norm, config.DATA_RANGE)).reshape(-1, 1).to(config.DEVICE)).cpu().numpy().flatten()
-                ann_coeffs = get_fq_coef(f_ann)
-                results['train_results'][epoch + 1][beta][seed]['ann_coeffs'] = ann_coeffs
+                if config.DATA_DIMENSION == 1:
+                    f_ann = lambda x_norm: model(torch.FloatTensor(rescale(x_norm, config.DATA_RANGE)).reshape(-1, 1).to(config.DEVICE)).cpu().numpy().flatten()
+                    ann_coeffs = get_fq_coef(f_ann)
+                    results['train_results'][epoch + 1][beta][seed]['ann_coeffs'] = ann_coeffs
+                else:
+                    results['train_results'][epoch + 1][beta][seed]['ann_coeffs'] = None
 
     # --- 绘制并保存当前参数下的损失曲线 ---
     epochs_recorded = np.arange(len(train_losses)) * 10 

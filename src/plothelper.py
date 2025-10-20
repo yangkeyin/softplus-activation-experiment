@@ -1,14 +1,41 @@
-# Utilities for generating orthogonal polynomials.
-
+import os
+import pickle
+from re import A
 import numpy as np
-from numpy import pi, sqrt, sin, dot, sum, sign, arange
-from numpy.linalg import inv, qr, cholesky
+import matplotlib.pyplot as plt
 
-import numpy.polynomial.chebyshev  as cheb
-import numpy.polynomial.legendre   as lege
-import numpy.polynomial.polynomial as poly
 
-# ---绘制目标函数---
+    # ---绘制目标函数---
+def plot_all(data_dir, data_dimension=1):
+    analysis_dir= os.path.join(data_dir, "analysis")
+    os.makedirs(analysis_dir, exist_ok=True)
+    RESULTS_PKL_PATH = os.path.join(data_dir, "results.pkl")
+    
+    try:
+        with open(RESULTS_PKL_PATH, 'rb') as f:
+            results = pickle.load(f)
+        print(f"Successfully loaded results from '{RESULTS_PKL_PATH}'")
+    except FileNotFoundError:
+        print(f"Error: Results file not found at '{RESULTS_PKL_PATH}'")
+        return
+        
+    # 首先生成颜色映射，确保所有图表颜色一致
+    color_map = get_color_map(results['fixed_params']['beta'])
+    
+    # 调用所有绘图函数
+    if data_dimension == 1:
+        plot_fitting_function_comparison(results, analysis_dir, color_map)
+        plot_fitting_function_frequency_comparison(results, analysis_dir, color_map)
+        plot_all_std_dev_comparison(results, analysis_dir, color_map)
+    elif data_dimension == 2:
+        plot_3d_fit_and_error_summary(results, analysis_dir)
+        plot_all_std_dev_comparison(results, analysis_dir, color_map)
+    else:
+        print(f"Error: data_dimension must be 1 or 2, but got {data_dimension}")
+        return
+    
+    print(f"\nAll summary plots have been saved to '{analysis_dir}'")
+    
 def get_color_map(betas):
     """
     为每个 (优化器, 学习率) 组合生成一个唯一的颜色映射。
@@ -18,6 +45,68 @@ def get_color_map(betas):
     color_map = {beta: color for beta, color in zip(betas, color_cycle)}
     return color_map
 
+# ==============================================================================
+# 3D 绘图函数 (新增)
+# ==============================================================================
+def plot_3d_fit_and_error_summary(results, base_output_dir):
+    """
+    为每个epoch和每个beta配置，绘制3D拟合曲面对比图和误差曲面图。
+    """
+    print("正在生成3D拟合与误差曲面对比图...")
+    X_test = results['X_test']
+    y_test = results['y_test'].flatten()
+    train_results = results['train_results']
+
+    # 按 Epoch 循环
+    for epoch_val, epoch_data in train_results.items():
+        # 按 Beta 循环
+        for beta, seed_data in epoch_data.items():
+            
+            # 收集当前配置下所有 seed 的预测数据
+            preds_from_seeds = [res['y_pred'] for res in seed_data.values()]
+            if not preds_from_seeds:
+                continue
+            
+            # 计算所有 seed 的平均预测值和平均误差
+            mean_pred = np.mean(preds_from_seeds, axis=0).flatten()
+            mean_error = y_test - mean_pred
+
+            # --- 开始绘图 ---
+            fig = plt.figure(figsize=(24, 7))
+            title = f'2D Function Fit Summary - Epoch: {epoch_val}, Beta: {beta}'
+            fig.suptitle(title, fontsize=16)
+
+            # 1. 真实函数曲面
+            ax1 = fig.add_subplot(1, 3, 1, projection='3d')
+            ax1.plot_trisurf(X_test[:, 0], X_test[:, 1], y_test, cmap='viridis', edgecolor='none')
+            ax1.set_title('True Surface')
+            ax1.set_xlabel('X')
+            ax1.set_ylabel('Y')
+            ax1.set_zlabel('Z')
+
+            # 2. 模型预测的平均曲面
+            ax2 = fig.add_subplot(1, 3, 2, projection='3d')
+            ax2.plot_trisurf(X_test[:, 0], X_test[:, 1], mean_pred, cmap='cividis', edgecolor='none')
+            ax2.set_title('Average Predicted Surface')
+            ax2.set_xlabel('X')
+            ax2.set_ylabel('Y')
+            ax2.set_zlabel('Z')
+
+            # 3. 拟合误差的平均曲面
+            ax3 = fig.add_subplot(1, 3, 3, projection='3d')
+            ax3.plot_trisurf(X_test[:, 0], X_test[:, 1], mean_error, cmap='coolwarm', edgecolor='none')
+            ax3.set_title('Average Error Surface (True - Pred)')
+            ax3.set_xlabel('X')
+            ax3.set_ylabel('Y')
+            ax3.set_zlabel('Error')
+            
+            # 保存图像
+            filename = f"fit_summary_3d_epoch_{epoch_val}_beta_{beta}.png"
+            filepath = os.path.join(base_output_dir, filename)
+            plt.savefig(filepath, dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            
+    print("完成。")
 
 def plot_fitting_function_comparison(results, base_output_dir, color_map):
     """
@@ -205,76 +294,3 @@ def plot_all_std_dev_comparison(results, base_output_dir, color_map):
     plt.savefig(filepath, dpi=150)
     plt.close(fig)
     print("Done.")
-
-
-def rescale(x, data_range):
-    return 2 * (x - np.min(data_range)) / (np.max(data_range) - np.min(data_range)) - 1  # 归一化到 [-1, 1]
-
-def get_orthpoly(n_deg, f_weighting, n_extra_point = 10, return_coef = True, representation='chebyshev', integral_method='legendre'):
-    """
-     Get orthogonal polynomials with respect to the weighting (f_weighting).
-     The polynomials are represented by coefficients of Chebyshev polynomials.
-     Evaluate it as: np.dot(cheb.chebvander(set_of_x, n_deg), repr_coef)
-     See weighted_orthpoly1.py for validation of this algorithm.
-    """
-    n_sampling = n_deg + 1 + n_extra_point
-    # Do the intergration by discrete sampling at good points.
-    if integral_method == 'chebyshev':
-        # Here we use (first kind) Chebyshev points.
-        x_sampling = sin( pi * (-(n_sampling-1)/2 + np.arange(n_sampling))/n_sampling )
-        # Put together the weighting and the weighting of the Gauss-Chebyshev quadrature.
-        diag_weight = np.array([f_weighting(x)/cheb.chebweight(x) for x in x_sampling]) * (pi/n_sampling)
-    elif integral_method == 'legendre':
-        # Use Gauss-Legendre quadrature.
-        x_sampling, int_weight = lege.leggauss(n_sampling)
-        diag_weight = np.array([f_weighting(x)*w for x, w in zip(x_sampling, int_weight)])
-
-    if representation == 'chebyshev':
-        V = cheb.chebvander(x_sampling, n_deg)
-    else:
-        V = lege.legvander(x_sampling, n_deg)
-    
-    # Get basis from chol of the Gramian matrix.
-#    inner_prod_matrix = dot(V.T, diag_weight[:, np.newaxis] * V)
-#    repr_coef = inv(cholesky(inner_prod_matrix).T)
-    # QR decomposition should give more accurate result.
-    repr_coef = inv(qr(sqrt(diag_weight[:, np.newaxis]) * V, mode='r'))
-    repr_coef = repr_coef * sign(sum(repr_coef,axis=0))
-    
-    if return_coef:
-        return repr_coef
-    else:
-        if representation == 'chebyshev':
-            polys = [cheb.Chebyshev(repr_coef[:,i]) for i in range(n_deg+1)]
-        else:
-            polys = [lege.Legendre (repr_coef[:,i]) for i in range(n_deg+1)]
-        return polys
-
-def orthpoly_coef(f, f_weighting, n_deg, **kwarg):
-    if f_weighting == 'chebyshev':
-        x_sample = sin( pi * (-n_deg/2 + arange(n_deg+1))/(n_deg+1) )
-        V = cheb.chebvander(x_sample, n_deg)
-    elif f_weighting == 'legendre':
-        x_sample = lege.legroots(1*(arange(n_deg+2)==n_deg+1)) # 先生成一个n_deg+2个项的勒让德多项式多项式，最高项系数为1，并求解其根
-        V = sqrt(arange(n_deg+1)+0.5) * lege.legvander(x_sample, n_deg)
-    else:
-        x_sample = lege.legroots(1*(arange(n_deg+2)==n_deg+1))
-        basis_repr_coef = get_orthpoly(n_deg, f_weighting, 100, **kwarg)
-        V = dot(cheb.chebvander(x_sample, n_deg), basis_repr_coef)
-
-    if f == None:
-        # Return Pseudo-Vandermonde matrix.
-        return V
-
-    y_sample = f(x_sample)
-    coef = np.linalg.solve(V, y_sample)
-    return coef
-
-# vim: et sw=4 sts=4
-
-# --- 勒让德多项式相关参数 ---
-N_POLY_ORDER = 100 # 勒让德多项式的阶数
-V = orthpoly_coef(None, 'legendre', N_POLY_ORDER)
-#x_sample = sin( pi * (-n_poly_order/2 + arange(n_poly_order+1))/(n_poly_order+1) )
-x_sample = lege.legroots(1*(np.arange(N_POLY_ORDER+2)==N_POLY_ORDER+1)) # 生成n_poly_order+2个项的勒让德多项式多项式，最高项系数为1，并求解其根
-get_fq_coef = lambda f: np.linalg.solve(V, f(x_sample)) # 函数，解线性方程组V * c = f(x_sample)的系数，这组系数就是函数f的频谱，c[0]代表最平缓的成分，c[k]代表越来越高频，变化越来越剧烈的部分
