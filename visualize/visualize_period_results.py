@@ -8,7 +8,7 @@ import math
 # ==============================================================================
 # 配置参数
 # ==============================================================================
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/period/1014_SmallPoint_WidePeriod_9FixedTrainPoints")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/period/1017_SmallPoint_WidePeriod_800FixedTrainPoints")
 
 # ==============================================================================
 # 周期分析函数

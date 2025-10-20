@@ -46,11 +46,11 @@ K_LIST = (2 * np.pi) / PERIOD_LIST
 # DATA_RANGE = [-2 * np.pi, 2 * np.pi]  # 数据范围
 
 # 自定义训练数据点数量，将在等距采样中使用
-NUM_TRAIN_POINTS = 18  # 自定义训练数据点数量
-NUM_TEST_POINTS = 100  # 自定义测试数据点数量
+NUM_TRAIN_POINTS = 800  # 自定义训练数据点数量
+NUM_TEST_POINTS = 200  # 自定义测试数据点数量
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/period/1014_SmallPoint_WidePeriod_18FixedTrainPoints")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/period/1017_SmallPoint_WidePeriod_800FixedTrainPoints")
 
 # ==============================================================================
 # 2. 模型定义

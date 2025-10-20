@@ -30,14 +30,19 @@ epochs = EPOCHS_LIST[-1]
 # 定义当前要使用的 BETA 列表
 BETA_TO_RUN = [0.5,1,2,4,8,10,20,50] # 指定需要可视化拟合曲线的beta值
 
+# --- 改变linear层的初始化分布 ---
+MU = 0.1
+STD = 0.15
+
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/beta/1014LocationFit_N6pi_to_P6pi")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/beta/1017CustomInitial_N6pi_to_P6pi_MU{}_STD{}".format(MU,STD))
 # # 设置随机种子以保证结果可复现
 # torch.manual_seed(52)
 # np.random.seed(52)
 
 # --- 统计稳定性测试参数 ---
 SEED_LIST = [42,38,100]  # 使用多个随机种子进行重复实验
+
 
 # ==============================================================================
 # 2. 模型定义 (Model Definition)
@@ -51,6 +56,9 @@ class SimpleMLP(nn.Module):
             nn.Softplus(beta), # default:torch.nn.Softplus(beta=1.0, threshold=20)
             nn.Linear(n_neurons, 1)
         )
+
+        nn.init.normal_(self.layers[0].weight, mean=MU, std=STD)
+        nn.init.normal_(self.layers[2].weight, mean=MU, std=STD)
     
     def forward(self, x):
         return self.layers(x)

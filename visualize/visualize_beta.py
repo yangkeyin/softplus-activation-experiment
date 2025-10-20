@@ -4,9 +4,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FormatStrFormatter, NullLocator
+MU = 0.1
+STD = 0.15
 
 # 设置输出目录
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "results/beta/1014LocationFit_N6pi_to_P6pi")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/beta/1017CustomInitial_N6pi_to_P6pi_MU{}_STD{}".format(MU,STD))
 
 
 def run_beta_analysis(results):
