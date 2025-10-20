@@ -21,8 +21,8 @@ TEST_SIZE = 0.2
 
 # --- 模型与训练参数 ---
 # n也作为一个变量进行测试
-N_NEURONS_LIST = [32,64,128,256]  # 您可以修改或增加神经元数量的测试列表
-LEARNING_RATE = 0.01
+N_NEURONS = 64  # 您可以修改或增加神经元数量的测试列表
+LEARNING_RATE = 0.001
 EPOCHS_LIST = [100, 1000] # 实验不同训练时长的影响
 epochs = EPOCHS_LIST[-1]
 
@@ -31,7 +31,7 @@ epochs = EPOCHS_LIST[-1]
 BETA_TO_RUN = [0.5,1,2,4,8,10,20,50] # 指定需要可视化拟合曲线的beta值
 
 # --- 输出配置 ---
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/beta/1017CustomInitial_N6pi_to_P6pi_MU{}_STD{}".format(MU,STD))
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../results/beta/1017CustomInitial_N6pi_to_P6pi_MU{}_STD{}".format(MU,ST) )
 # # 设置随机种子以保证结果可复现
 # torch.manual_seed(52)
 # np.random.seed(52)
@@ -53,9 +53,6 @@ class SimpleMLP(nn.Module):
             nn.Linear(n_neurons, 1)
         )
 
-        nn.init.normal_(self.layers[0].weight, mean=MU, std=STD)
-        nn.init.normal_(self.layers[2].weight, mean=MU, std=STD)
-    
     def forward(self, x):
         return self.layers(x)
 
@@ -94,7 +91,7 @@ def generate_data(data_range, num_points, test_size):
 # 4. 训练与评估函数 (Training and Evaluation Function)
 # ==============================================================================
 
-def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, n, beta, output_dir, seed, results):
+def train_and_evaluate(model, X_train, y_train, X_test, y_test, lr, epochs, beta, output_dir, seed, results):
     """
     训练模型，评估并绘制损失曲线
     Args:
@@ -210,40 +207,35 @@ if __name__ == "__main__":
         # 将原来的训练结果嵌套在一个新的键 'train_results' 中
         'train_results': {
             epochs: {
-                n: {
                     beta: {
                         seed: {'y_pred_std': None, 'y_pred': None} for seed in SEED_LIST
                     } for beta in BETA_TO_RUN
-                } for n in N_NEURONS_LIST
             } for epochs in EPOCHS_LIST
         }
     }
     
-    for n in N_NEURONS_LIST:
-        print(f"\n{'='*20} Starting Experiment for n = {n} Neurons {'='*20}")
+    for beta in BETA_TO_RUN:
+        print(f"\n--- Training with n={n}, beta={beta} ---")
+
+        for seed in SEED_LIST:
+            # 设置随机种子
+            print(f"Setting seed to {seed} for n={n}, beta={beta}")
+            torch.manual_seed(seed)
+            np.random.seed(seed)
         
-        for beta in BETA_TO_RUN:
-            print(f"\n--- Training with n={n}, beta={beta} ---")
-
-            for seed in SEED_LIST:
-                # 设置随机种子
-                print(f"Setting seed to {seed} for n={n}, beta={beta}")
-                torch.manual_seed(seed)
-                np.random.seed(seed)
+            # 实例化模型
+            model = SimpleMLP(n_neurons=n, beta=beta).to(DEVICE)
             
-                # 实例化模型
-                model = SimpleMLP(n_neurons=n, beta=beta).to(DEVICE)
-                
-                # 训练和评估
-                std_dev, y_pred = train_and_evaluate(
-                    model, X_train, y_train, X_test, y_test, LEARNING_RATE, epochs, n, beta, OUTPUT_DIR, seed, results
-                )
+            # 训练和评估
+            std_dev, y_pred = train_and_evaluate(
+                model, X_train, y_train, X_test, y_test, LEARNING_RATE, epochs, n, beta, OUTPUT_DIR, seed, results
+            )
 
-                # 保存最终结果
-                results['train_results'][epochs][n][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
-                results['train_results'][epochs][n][beta][seed]['y_pred_std'] = std_dev
-            
-            print(f"--- Result for n={n}, beta={beta}: std(y_err) = {std_dev:.6f} ---")
+            # 保存最终结果
+            results['train_results'][epochs][beta][seed]['y_pred'] = y_pred.cpu().numpy().flatten()
+            results['train_results'][epochs][beta][seed]['y_pred_std'] = std_dev
+        
+        print(f"--- Result for beta={beta}: std(y_err) = {std_dev:.6f} ---")
 
 
     # 将results保存为pickle文件

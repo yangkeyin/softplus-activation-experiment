@@ -27,8 +27,8 @@ EPOCHS_LIST = [100, 1000, 10000] # 实验不同训练时长的影响
 epochs = EPOCHS_LIST[-1]
 
 # --- 定义感兴趣的width列表 ---
-WIDTH_LIST = np.array([0.01, 0.03, 0.25, 0.5, 1., 1.5, 2, 3, 4])
-TAGET_WIDTH = WIDTH_LIST * np.pi
+WIDTH_LIST = np.array([0.01, 0.03, 0.25, 0.5, 1., 1.5, 2, 3, 4]) 
+TAGET_WIDTH = WIDTH_LIST * np.pi # [9.35166421 1.1221997  0.56109985 0.28054993 0.18703328 0.14027496 0.09351664 0.07013748]
 
 # ---根据width计算beta---
 BETA_FROM_WIDTH = np.abs(np.log(np.sqrt(2)-1)) / TAGET_WIDTH

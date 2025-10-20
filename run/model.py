@@ -231,6 +231,11 @@ if __name__ == "__main__":
         'X_train': X_train.cpu().numpy(),
         'y_train': y_train.cpu().numpy(),
         'true_coeffs': true_coeffs,
+        'fixed_params': {
+            'beta': BETA_TO_RUN,
+            'epochs': EPOCHS_LIST,
+            'seed': SEED_LIST,
+        },
 
         # 将原来的训练结果嵌套在一个新的键 'train_results' 中
         'train_results': {
