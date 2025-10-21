@@ -59,6 +59,10 @@ def plot_3d_fit_and_error_summary(results, base_output_dir):
 
     # 按 Epoch 循环
     for epoch_val, epoch_data in train_results.items():
+        # 为当前 epoch 创建专属子目录
+        epoch_dir = os.path.join(base_output_dir, f"epoch_{epoch_val}")
+        os.makedirs(epoch_dir, exist_ok=True)
+
         # 按 Beta 循环
         for beta, seed_data in epoch_data.items():
             
@@ -78,7 +82,7 @@ def plot_3d_fit_and_error_summary(results, base_output_dir):
 
             # 1. 真实函数曲面
             ax1 = fig.add_subplot(1, 3, 1, projection='3d')
-            ax1.plot_trisurf(X_test[:, 0], X_test[:, 1], y_test, cmap='viridis', edgecolor='none')
+            ax1.plot_trisurf(X_test[:, 0], X_test[:, 1], y_test, cmap='coolwarm', edgecolor='none') # edgecolor='none' 隐藏边框
             ax1.set_title('True Surface')
             ax1.set_xlabel('X')
             ax1.set_ylabel('Y')
@@ -86,7 +90,7 @@ def plot_3d_fit_and_error_summary(results, base_output_dir):
 
             # 2. 模型预测的平均曲面
             ax2 = fig.add_subplot(1, 3, 2, projection='3d')
-            ax2.plot_trisurf(X_test[:, 0], X_test[:, 1], mean_pred, cmap='cividis', edgecolor='none')
+            ax2.plot_trisurf(X_test[:, 0], X_test[:, 1], mean_pred, cmap='coolwarm', edgecolor='none') 
             ax2.set_title('Average Predicted Surface')
             ax2.set_xlabel('X')
             ax2.set_ylabel('Y')
@@ -100,9 +104,9 @@ def plot_3d_fit_and_error_summary(results, base_output_dir):
             ax3.set_ylabel('Y')
             ax3.set_zlabel('Error')
             
-            # 保存图像
-            filename = f"fit_summary_3d_epoch_{epoch_val}_beta_{beta}.png"
-            filepath = os.path.join(base_output_dir, filename)
+            # 保存图像到当前 epoch 子目录
+            filename = f"beta_{beta}.png"
+            filepath = os.path.join(epoch_dir, filename)
             plt.savefig(filepath, dpi=120, bbox_inches='tight')
             plt.close(fig)
             
@@ -294,3 +298,7 @@ def plot_all_std_dev_comparison(results, base_output_dir, color_map):
     plt.savefig(filepath, dpi=150)
     plt.close(fig)
     print("Done.")
+
+if __name__ == "__main__":
+    data_dir = "./results/target2D/x2_add_y2"
+    plot_all(data_dir, data_dimension=2)
