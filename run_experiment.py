@@ -15,7 +15,7 @@ from src.plothelper import plot_all
 # 动态加载配置
 # 这里可以用 argparse 让它更灵活，例如: python run_experiment.py --config=exp_sgd_lr_01
 config_module = importlib.import_module("configs.target2D")
-CFG = config_module.X2AddY2()
+CFG = config_module.SinXMulSinY()
 
 
 def main():
@@ -97,9 +97,8 @@ def main():
     with open(os.path.join(CFG.OUTPUT_DIR, 'results.pkl'), 'wb') as f:
         pickle.dump(results, f)
 
-    
     # visualize the results
-    plot_all(CFG.OUTPUT_DIR, CFG.DATA_DIMENSION)
+    plot_all(CFG.OUTPUT_DIR, CFG.DATA_DIMENSION, num_train_points=CFG.NUM_TRAIN_POINTS)
 
 
 if __name__ == "__main__":

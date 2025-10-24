@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
     # ---绘制目标函数---
-def plot_all(data_dir, data_dimension=1):
+def plot_all(data_dir, data_dimension=1, num_train_points=None):
     analysis_dir= os.path.join(data_dir, "analysis")
     os.makedirs(analysis_dir, exist_ok=True)
     RESULTS_PKL_PATH = os.path.join(data_dir, "results.pkl")
@@ -28,7 +28,7 @@ def plot_all(data_dir, data_dimension=1):
         plot_fitting_function_frequency_comparison(results, analysis_dir, color_map)
         plot_all_std_dev_comparison(results, analysis_dir, color_map)
     elif data_dimension == 2:
-        plot_3d_fit_and_error_summary(results, analysis_dir)
+        plot_3d_fit_and_error_summary(results, analysis_dir, num_train_points=num_train_points)
         plot_all_std_dev_comparison(results, analysis_dir, color_map)
     else:
         print(f"Error: data_dimension must be 1 or 2, but got {data_dimension}")
@@ -48,7 +48,7 @@ def get_color_map(betas):
 # ==============================================================================
 # 3D 绘图函数 (新增)
 # ==============================================================================
-def plot_3d_fit_and_error_summary(results, base_output_dir):
+def plot_3d_fit_and_error_summary(results, base_output_dir, num_train_points=None):
     """
     为每个epoch和每个beta配置，绘制3D拟合曲面对比图和误差曲面图。
     """
@@ -77,7 +77,11 @@ def plot_3d_fit_and_error_summary(results, base_output_dir):
 
             # --- 开始绘图 ---
             fig = plt.figure(figsize=(24, 7))
-            title = f'2D Function Fit Summary - Epoch: {epoch_val}, Beta: {beta}'
+            title = f'2D Function Fit Summary - Epoch: {epoch_val}'
+            if num_train_points is not None:
+                title += f', Train Points: {num_train_points}, Beta: {beta}'
+            else:
+                title += f', Beta: {beta}'
             fig.suptitle(title, fontsize=16)
 
             # 1. 真实函数曲面
@@ -301,4 +305,4 @@ def plot_all_std_dev_comparison(results, base_output_dir, color_map):
 
 if __name__ == "__main__":
     data_dir = "./results/target2D/x2_add_y2"
-    plot_all(data_dir, data_dimension=2)
+    plot_all(data_dir, data_dimension=2, num_train_points=1000)
