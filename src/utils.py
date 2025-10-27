@@ -10,7 +10,7 @@ import numpy.polynomial.polynomial as poly
 
 
 def rescale(x, data_range):
-    return 2 * (x - np.min(data_range)) / (np.max(data_range) - np.min(data_range)) - 1  # 归一化到 [-1, 1]
+    return (x + 1) * (np.max(data_range) - np.min(data_range)) / 2 + np.min(data_range)  # 将【-1，1】映射到【data_range】
 
 def get_orthpoly(n_deg, f_weighting, n_extra_point = 10, return_coef = True, representation='chebyshev', integral_method='legendre'):
     """
