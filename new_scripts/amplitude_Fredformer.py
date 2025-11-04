@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+import os
 
 # --- 0. 配置 ---
 # 确保结果可复现
@@ -21,9 +22,13 @@ PRED_LEN = 96   # 预测序列长度
 TOTAL_LEN = SEQ_LEN + PRED_LEN
 
 # 训练参数
-EPOCHS = 10
+EPOCHS = 50
 BATCH_SIZE = 64
 LR = 0.001
+
+OUTPUT_DIR = './figures/Transformer_amplitude'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 
 # --- 1. 合成数据生成 ---
 
@@ -316,24 +321,42 @@ def train_and_analyze(
     # 计算FFT用于绘图 (在整个窗口上)
      # [cite: 113] "We use DFT to analyze the frequency content of X, X_hat and X'"
     # X_hat 是 Ground Truth, X' 是 Forecasting
-    input_fft_mag = np.abs(np.fft.fft(x_test_sample))
-    true_fft_mag = np.abs(np.fft.fft(y_test_sample))
-    pred_fft_mag = np.abs(np.fft.fft(pred_y_time))
     
-    # 频率轴
-    fft_freq_input = np.fft.fftfreq(SEQ_LEN, d=1)
-    fft_freq_pred = np.fft.fftfreq(PRED_LEN, d=1)
+    # <--- 修改：应用 "先填充，后加窗" 方案进行绘图 ---
+    print("应用 '先填充，后加窗' 方案准备绘图数据...")
 
-    # 取FFT的前半部分
-    N_in = SEQ_LEN // 2
-    N_pred = PRED_LEN // 2
-    
+    # 1. 定义 *统一的* N=SEQ_LEN 窗函数
+    win_common = np.hanning(SEQ_LEN)
+
+    # 2. 零填充至统一长度 (SEQ_LEN)
+    # Input (x_test_sample) 已经是 SEQ_LEN，无需填充
+    true_padded = np.pad(y_test_sample, (0, SEQ_LEN - PRED_LEN), 'constant')
+    pred_padded = np.pad(pred_y_time, (0, SEQ_LEN - PRED_LEN), 'constant')
+
+    # 3. 对 *所有* N=SEQ_LEN 的信号应用 *同一个* 窗
+    #    (x_test_sample 是 N=192)
+    #    (true_padded 是 N=192)
+    #    (pred_padded 是 N=192)
+    input_windowed = x_test_sample * win_common
+    true_windowed = true_padded * win_common
+    pred_windowed = pred_padded * win_common
+
+    # 4. 计算 FFT 幅度
+    input_fft_mag = np.abs(np.fft.fft(input_windowed))
+    true_fft_mag = np.abs(np.fft.fft(true_windowed))
+    pred_fft_mag = np.abs(np.fft.fft(pred_windowed))
+
+    # 5. 定义统一的频率轴 (基于 SEQ_LEN)
+    fft_freq_common = np.fft.fftfreq(SEQ_LEN, d=1)
+
+    # 6. 取FFT的前半部分 (N/2)
+    N_common = SEQ_LEN // 2
+
     plot_data = {
-        'input_fft_mag': input_fft_mag[:N_in], # 测试集输入的FFT幅度
-        'true_fft_mag': true_fft_mag[:N_pred], # 测试集真实值的FFT幅度
-        'pred_fft_mag': pred_fft_mag[:N_pred], # 测试集预测值的FFT幅度
-        'freq_axis_input': fft_freq_input[:N_in] * SEQ_LEN, # 转换为论文中的F轴 (k)
-        'freq_axis_pred': fft_freq_pred[:N_pred] * PRED_LEN, # 转换为论文中的F轴 (k)
+        'input_fft_mag': input_fft_mag[:N_common],
+        'true_fft_mag': true_fft_mag[:N_common],
+        'pred_fft_mag': pred_fft_mag[:N_common],
+        'freq_axis_common': fft_freq_common[:N_common] * SEQ_LEN, # 转换为 k
     }
 
     return error_history, plot_data
@@ -345,7 +368,7 @@ def train_and_analyze(
 def run_figure_2a():
     print("--- 正在运行 Figure 2(a) ---")
     
-    # 定义3个关键频率
+    # 定义3个关键频率 - 分析目标（相对于SEQ_LEN=192）
     key_freqs_2a = [10, 25, 40] # k1, k2, k3
     
     # 场景 1 (左图): 振幅 k1 > k2 > k3
@@ -353,7 +376,11 @@ def run_figure_2a():
     # 我们复现图表所显示的视觉效果。
     print("运行场景 1 (左图): Amp(k1) > Amp(k2) > Amp(k3)")
     amps_left = [20.0, 10.0, 5.0]
-    data_left = generate_time_series(10000, amps_left, key_freqs_2a, noise_level=2.0)
+    # 计算用于 N=10000 数据生成的"工厂频率"
+    # f = k_lab / N_lab = k_factory / N_factory
+    # k_factory = (k_lab / N_lab) * N_factory
+    data_gen_freqs_left = [(k / SEQ_LEN) * 10000 for k in key_freqs_2a]
+    data_left = generate_time_series(10000, amps_left, data_gen_freqs_left, noise_level=2.0)
      # [cite: 167] "employ a Transformer model [29]"
     model_left = SimpleTransformerModel(
         d_model=32, nhead=4, num_layers=2, 
@@ -368,7 +395,9 @@ def run_figure_2a():
      # [cite: 185] "synthetic data with higher amplitudes in the mid and high-frequency ranges"
     print("运行场景 2 (右图): Amp(k1) < Amp(k2) < Amp(k3)")
     amps_right = [5.0, 10.0, 20.0]
-    data_right = generate_time_series(10000, amps_right, key_freqs_2a, noise_level=2.0)
+    # 计算用于 N=10000 数据生成的"工厂频率"
+    data_gen_freqs_right = [(k / SEQ_LEN) * 10000 for k in key_freqs_2a]
+    data_right = generate_time_series(10000, amps_right, data_gen_freqs_right, noise_level=2.0)
     model_right = SimpleTransformerModel(
         d_model=32, nhead=4, num_layers=2, 
         input_dim=1, output_dim=1, 
@@ -384,11 +413,11 @@ def run_figure_2a():
     
     # --- 左图 (振幅图) ---
     ax_left_fft = fig.add_subplot(gs[0, 0])
-    # 注意：我们绘制预测窗口(PRED_LEN)的FFT
-    ax_left_fft.plot(plot_left['freq_axis_pred'], plot_left['true_fft_mag'], 'g-', label='Ground Truth', linewidth=2)
-    ax_left_fft.plot(plot_left['freq_axis_pred'], plot_left['pred_fft_mag'], 'r-', label='Forecasting', linewidth=2)
+    # 使用统一的频率轴绘制所有FFT
+    ax_left_fft.plot(plot_left['freq_axis_common'], plot_left['true_fft_mag'], 'g-', label='Ground Truth', linewidth=2)
+    ax_left_fft.plot(plot_left['freq_axis_common'], plot_left['pred_fft_mag'], 'r-', label='Forecasting', linewidth=2)
     # 绘制输入用于对比
-    ax_left_fft.plot(plot_left['freq_axis_input'], plot_left['input_fft_mag'], 'b--', label='Input (Lookback)', alpha=0.7)
+    ax_left_fft.plot(plot_left['freq_axis_common'], plot_left['input_fft_mag'], 'b--', label='Input (Lookback)', alpha=0.7)
     ax_left_fft.set_title("Fig 2(a) Left: $A(k1) > A(k2) > A(k3)$")
     ax_left_fft.set_xlabel("F (Frequency Component k)")
     ax_left_fft.set_ylabel("Amplitude")
@@ -406,9 +435,9 @@ def run_figure_2a():
 
     # --- 右图 (振幅图) ---
     ax_right_fft = fig.add_subplot(gs[0, 1])
-    ax_right_fft.plot(plot_right['freq_axis_pred'], plot_right['true_fft_mag'], 'g-', label='Ground Truth', linewidth=2)
-    ax_right_fft.plot(plot_right['freq_axis_pred'], plot_right['pred_fft_mag'], 'r-', label='Forecasting', linewidth=2)
-    ax_right_fft.plot(plot_right['freq_axis_input'], plot_right['input_fft_mag'], 'b--', label='Input (Lookback)', alpha=0.7)
+    ax_right_fft.plot(plot_right['freq_axis_common'], plot_right['true_fft_mag'], 'g-', label='Ground Truth', linewidth=2)
+    ax_right_fft.plot(plot_right['freq_axis_common'], plot_right['pred_fft_mag'], 'r-', label='Forecasting', linewidth=2)
+    ax_right_fft.plot(plot_right['freq_axis_common'], plot_right['input_fft_mag'], 'b--', label='Input (Lookback)', alpha=0.7)
     ax_right_fft.set_title("Fig 2(a) Right: $A(k1) < A(k2) < A(k3)$")
     ax_right_fft.set_xlabel("F (Frequency Component k)")
     ax_right_fft.set_ylabel("Amplitude")
@@ -423,11 +452,12 @@ def run_figure_2a():
     ax_right_heatmap.set_xlabel("#epoch")
     ax_right_heatmap.set_ylabel("Relative Error")
     
-    fig.colorbar(im, ax=[ax_left_heatmap, ax_right_heatmap], label="Relative Error (0=black, 1=white)")
+    fig.subplots_adjust(right=0.85)
+    fig.colorbar(im, ax=[ax_left_heatmap, ax_right_heatmap], cax=fig.add_axes([0.88, 0.15, 0.04, 0.7]), label="Relative Error (0=black, 1=white)")
     plt.tight_layout()
     plt.suptitle("Figure 2(a) Conceptual Reproduction: Frequency Bias in Transformers", y=1.03)
     plt.show()
-    fig.savefig('../figures/Transformer_amplitude/figure_2a.png')
+    fig.savefig(os.path.join(OUTPUT_DIR, 'figure_2a.png'))
 
 # --- 5. 复现 Figure 2(b) ---
  # [cite: 188] "Debiasing the Frequency Learning for the Transformer. (Case 2)"
@@ -436,11 +466,13 @@ def run_figure_2a():
 def run_figure_2b():
     print("--- 正在运行 Figure 2(b) ---")
     
-    # 4个关键频率
+    # 4个关键频率 - 分析目标（相对于SEQ_LEN=192）
     key_freqs_2b = [10, 20, 30, 40]
+    # 计算用于 N=10000 数据生成的"工厂频率"
+    data_gen_freqs = [(k / SEQ_LEN) * 10000 for k in key_freqs_2b]
     # 振幅递减
     amps_2b = [20.0, 15.0, 10.0, 5.0]
-    data_2b = generate_time_series(10000, amps_2b, key_freqs_2b, noise_level=2.0)
+    data_2b = generate_time_series(10000, amps_2b, data_gen_freqs, noise_level=2.0)
     
     # 实验 1: 时域模型 + 非归一化
      # [cite: 189] "Time domain model + Non-normalization"
@@ -490,12 +522,18 @@ def run_figure_2b():
     ]
     plot_data_list = [plot_b1, plot_b2, plot_b3]
     
+    # 确保plot_data中包含统一的频率轴参数
+    for plot_data in plot_data_list:
+        # 创建统一的频率轴参数
+        max_freq = max(max(plot_data['freq_axis_input']), max(plot_data['freq_axis_pred']))
+        plot_data['freq_axis_common'] = np.linspace(0, max_freq, 1000)
+    
     for ax, title, plot_data in zip(axes, titles, plot_data_list):
         # 绘制预测窗口(PRED_LEN)的FFT
-        ax.plot(plot_data['freq_axis_pred'], plot_data['true_fft_mag'], 'g-', label='Ground Truth', linewidth=2)
-        ax.plot(plot_data['freq_axis_pred'], plot_data['pred_fft_mag'], 'r-', label='Forecasting', linewidth=2)
+        ax.plot(plot_data['freq_axis_common'], np.interp(plot_data['freq_axis_common'], plot_data['freq_axis_pred'], plot_data['true_fft_mag']), 'g-', label='Ground Truth', linewidth=2)
+        ax.plot(plot_data['freq_axis_common'], np.interp(plot_data['freq_axis_common'], plot_data['freq_axis_pred'], plot_data['pred_fft_mag']), 'r-', label='Forecasting', linewidth=2)
         # 绘制输入用于对比
-        ax.plot(plot_data['freq_axis_input'], plot_data['input_fft_mag'], 'b--', label='Input (Lookback)', alpha=0.7)
+        ax.plot(plot_data['freq_axis_common'], np.interp(plot_data['freq_axis_common'], plot_data['freq_axis_input'], plot_data['input_fft_mag']), 'b--', label='Input (Lookback)', alpha=0.7)
         ax.set_title(title)
         ax.set_xlabel("F (Frequency Component k)")
         ax.set_xlim(0, max(key_freqs_2b) * 1.5)
@@ -506,7 +544,7 @@ def run_figure_2b():
     plt.tight_layout()
     plt.suptitle("Figure 2(b) Conceptual Reproduction: Debiasing Strategies", y=1.03)
     plt.show()
-    fig.savefig('../figures/Transformer_amplitude/figure_2b.png')
+    fig.savefig(os.path.join(OUTPUT_DIR, 'figure_2b.png'))
 
 
 # --- 6. 运行复现 ---
