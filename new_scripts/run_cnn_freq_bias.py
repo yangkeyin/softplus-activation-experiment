@@ -4,7 +4,6 @@ import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from src.utils import get_fq_coef, rescale
 
 # --- 配置 ---
 # 确保结果可复现
@@ -18,9 +17,8 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'使用设备: {DEVICE}')
 
 # 数据配置
-DATA_RANGE = [-4 * np.pi, 4 * np.pi]
 N_POINTS = 200  # 信号长度
-KEY_FREQS = [1.0, 5.0, 10.0]  # k1, k2, k3 - 关键频率
+KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
 NOISE_LEVEL = 0.1
 
 # 振幅配置（核心）
@@ -37,7 +35,7 @@ N_SAMPLES_TEST = 400
 SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
 
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias'
+OUTPUT_DIR = './figures/CNN_freq_bias_fft'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -71,13 +69,13 @@ class Simple1DCNN(nn.Module):
 
 
 # --- 数据生成函数 ---
-def generate_data_scenario(amps_list, key_freqs_list, n_samples):
+def generate_data_scenario(amps_list, key_freqs_k_list, n_samples):
     """
     生成指定场景的数据
     
     参数:
     amps_list: 振幅列表
-    key_freqs_list: 关键频率列表
+    key_freqs_k_list: 关键频率分量k列表
     n_samples: 生成的样本数量
     
     返回:
@@ -86,19 +84,19 @@ def generate_data_scenario(amps_list, key_freqs_list, n_samples):
     X = []
     Y = []
     
-    # 生成x轴
-    x_axis = torch.linspace(DATA_RANGE[0], DATA_RANGE[1], N_POINTS)
+    # 生成时间序列索引
+    t = torch.arange(N_POINTS)
     
     # 循环生成样本
     for _ in range(n_samples):
         # 生成干净信号
-        y_signal = torch.zeros_like(x_axis)
-        for amp, freq in zip(amps_list, key_freqs_list):
+        y_signal = torch.zeros(N_POINTS)
+        for amp, k_freq in zip(amps_list, key_freqs_k_list):
             phase = np.random.uniform(0, 2 * np.pi)
-            y_signal += amp * torch.sin(freq * x_axis + phase)
+            y_signal += amp * torch.sin(2 * np.pi * k_freq * t / N_POINTS + phase)
         
         # 添加噪声
-        noise = torch.randn_like(x_axis) * NOISE_LEVEL
+        noise = torch.randn(N_POINTS) * NOISE_LEVEL
         
         # 保存数据（添加批次和通道维度）
         Y.append(y_signal.reshape(1, N_POINTS))
@@ -114,91 +112,54 @@ def generate_data_scenario(amps_list, key_freqs_list, n_samples):
 # --- 辅助函数 ---
 def get_avg_spectrum(data_tensor):
     """
-    计算数据张量的平均频谱
+    计算数据张量的平均频谱（使用FFT）
     
     参数:
     data_tensor: 形状为 [N, 1, N_POINTS] 的数据张量
     
     返回:
-    avg_spectrum: 平均频谱系数的绝对值
+    avg_spectrum: 平均频谱振幅
     """
     # 转换为numpy数组并展平
-    data_np = data_tensor.cpu().numpy().reshape(-1, N_POINTS)
+    data_np = data_tensor.cpu().numpy().squeeze()  # 形状 [N_samples, N_POINTS]
     
-    # 计算每个样本的频谱
-    all_spectrums = []
-    for sample in data_np:
-        # 使用get_fq_coef获取频谱系数
-        # 注意：这里我们需要将numpy数组转换为函数
-        f = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), sample)
-        coef = get_fq_coef(f)
-        all_spectrums.append(np.abs(coef))
+    # 计算FFT
+    fft_data = np.fft.fft(data_np, axis=1)
+    fft_mag = np.abs(fft_data)
     
-    # 计算平均频谱
-    avg_spectrum = np.mean(all_spectrums, axis=0)
-    return avg_spectrum
+    # 计算平均频谱并只返回正频率部分
+    avg_fft_mag = np.mean(fft_mag, axis=0)
+    return avg_fft_mag[:N_POINTS // 2]
 
-def get_avg_relative_error(pred_tensor, target_tensor, key_indices):
+def get_avg_relative_error(pred_tensor, target_tensor, key_indices_k):
     """
     计算在关键频率上的平均相对误差
     
     参数:
     pred_tensor: 预测数据，形状为 [N, 1, N_POINTS]
     target_tensor: 目标数据，形状为 [N, 1, N_POINTS]
-    key_indices: 关键频率的索引列表
+    key_indices_k: 关键频率分量k的列表
     
     返回:
     avg_errors: 每个关键频率的平均相对误差
     """
+    # 计算FFT振幅
+    pred_fft_mag = np.abs(np.fft.fft(pred_tensor.cpu().numpy().squeeze(), axis=1))
+    target_fft_mag = np.abs(np.fft.fft(target_tensor.cpu().numpy().squeeze(), axis=1))
+    
     errors = []
     
-    # 对每个样本计算频谱误差
-    for i in range(pred_tensor.shape[0]):
-        # 获取预测和目标的频谱
-        f_pred = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), pred_tensor[i, 0].cpu().numpy())
-        f_target = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), target_tensor[i, 0].cpu().numpy())
+    # 计算每个关键频率的相对误差
+    for k in key_indices_k:
+        true_mag_k = np.mean(target_fft_mag[:, k])  # 在批次上取平均
+        pred_mag_k = np.mean(pred_fft_mag[:, k])   # 在批次上取平均
         
-        pred_coef = get_fq_coef(f_pred)
-        target_coef = get_fq_coef(f_target)
-        
-        # 计算关键频率的相对误差
-        rel_errors = []
-        for idx in key_indices:
-            if np.abs(target_coef[idx]) > 1e-10:  # 避免除以零
-                rel_error = np.abs(pred_coef[idx] - target_coef[idx]) / np.abs(target_coef[idx])
-            else:
-                rel_error = np.abs(pred_coef[idx] - target_coef[idx])
-            rel_errors.append(rel_error)
-        
-        errors.append(rel_errors)
+        if true_mag_k < 1e-6:
+            errors.append(0.0)
+        else:
+            errors.append(np.abs(pred_mag_k - true_mag_k) / true_mag_k)
     
-    # 计算平均误差
-    avg_errors = np.mean(errors, axis=0)
-    return avg_errors
-
-def get_key_frequency_indices(key_freqs, n_points, data_range):
-    """
-    根据关键频率计算它们在频谱中的索引
-    
-    参数:
-    key_freqs: 关键频率列表
-    n_points: 信号长度
-    data_range: 数据范围
-    
-    返回:
-    key_indices: 关键频率的索引列表
-    """
-    # 频率分辨率
-    freq_resolution = (key_freqs[-1] * 2) / (n_points - 1)
-    
-    # 计算索引（近似）
-    key_indices = []
-    for freq in key_freqs:
-        # 映射频率到索引
-        idx = int(freq / freq_resolution)
-        key_indices.append(idx)
-    
-    return key_indices
+    return np.array(errors)
 
 
 # --- 主实验函数 ---
@@ -206,9 +167,9 @@ def main():
     # 初始化结果字典
     results = {}
     
-    # 计算关键频率索引
-    key_indices = get_key_frequency_indices(KEY_FREQS, N_POINTS, DATA_RANGE)
-    print(f"关键频率索引: {key_indices}")
+    # 关键索引现在就是k值
+    key_indices_k = KEY_FREQS_K
+    print(f"关键频率分量k: {key_indices_k}")
     
     # 外层循环（遍历场景）
     for scenario_name, amps in SCENARIOS.items():
@@ -217,9 +178,9 @@ def main():
         
         # 生成数据
         print(f"  生成训练数据 ({N_SAMPLES_TRAIN} 样本)...")
-        X_train, Y_train = generate_data_scenario(amps, KEY_FREQS, N_SAMPLES_TRAIN)
+        X_train, Y_train = generate_data_scenario(amps, KEY_FREQS_K, N_SAMPLES_TRAIN)
         print(f"  生成测试数据 ({N_SAMPLES_TEST} 样本)...")
-        X_test, Y_test = generate_data_scenario(amps, KEY_FREQS, N_SAMPLES_TEST)
+        X_test, Y_test = generate_data_scenario(amps, KEY_FREQS_K, N_SAMPLES_TEST)
         
         # 将数据移到设备上
         X_train, Y_train = X_train.to(DEVICE), Y_train.to(DEVICE)
@@ -262,7 +223,7 @@ def main():
                     model.eval()
                     with torch.no_grad():
                         Y_pred_test = model(X_test)
-                        avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices)
+                        avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices_k)
                         error_history.append(avg_errors)
                     
                     if (epoch + 1) % 200 == 0:
@@ -301,49 +262,55 @@ def visualize_results(results):
         fig = plt.figure(figsize=(12, 10))
         gs = fig.add_gridspec(2, 2)
         
+        # 创建k轴
+        k_axis = np.arange(N_POINTS // 2)
+        max_k = max(KEY_FREQS_K) * 1.5
+        
         # 子图1: 场景1频谱
         ax1 = fig.add_subplot(gs[0, 0])
-        ax1.semilogy(results['Scenario_1_LowFreqBias']['avg_input_spectrum'], 'b--', label='Input')
-        ax1.semilogy(results['Scenario_1_LowFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
-        ax1.semilogy(results['Scenario_1_LowFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
-                    label=f'Forecasting (k={kernel_size})')
+        ax1.plot(k_axis, results['Scenario_1_LowFreqBias']['avg_input_spectrum'], 'b--', label='Input (Lookback)')
+        ax1.plot(k_axis, results['Scenario_1_LowFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
+        ax1.plot(k_axis, results['Scenario_1_LowFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
+                label=f'Forecasting (k={kernel_size})')
         ax1.set_title('场景 1 (低频偏置) 频谱')
-        ax1.set_xlabel('频率 k')
-        ax1.set_ylabel('|频谱系数|')
+        ax1.set_xlabel('F (Frequency Component k)')
+        ax1.set_ylabel('Amplitude')
+        ax1.set_xlim(0, max_k)
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
         # 子图2: 场景1误差演化
         ax2 = fig.add_subplot(gs[1, 0])
         data1 = results['Scenario_1_LowFreqBias'][kernel_size]['error_history'].T
-        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=0, vmax=1.0)
+        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=np.min(data1), vmax=np.max(data1))
         ax2.set_title('场景 1 相对误差')
         ax2.set_xlabel('评估步骤 (Epoch Step)')
         ax2.set_ylabel('关键频率 (k1, k2, k3)')
         ax2.set_yticks([0, 1, 2])
-        ax2.set_yticklabels([f'k={KEY_FREQS[0]}', f'k={KEY_FREQS[1]}', f'k={KEY_FREQS[2]}'])
+        ax2.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
         
         # 子图3: 场景2频谱
         ax3 = fig.add_subplot(gs[0, 1])
-        ax3.semilogy(results['Scenario_2_HighFreqBias']['avg_input_spectrum'], 'b--', label='Input')
-        ax3.semilogy(results['Scenario_2_HighFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
-        ax3.semilogy(results['Scenario_2_HighFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
-                    label=f'Forecasting (k={kernel_size})')
+        ax3.plot(k_axis, results['Scenario_2_HighFreqBias']['avg_input_spectrum'], 'b--', label='Input (Lookback)')
+        ax3.plot(k_axis, results['Scenario_2_HighFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
+        ax3.plot(k_axis, results['Scenario_2_HighFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
+                label=f'Forecasting (k={kernel_size})')
         ax3.set_title('场景 2 (高频偏置) 频谱')
-        ax3.set_xlabel('频率 k')
-        ax3.set_ylabel('|频谱系数|')
+        ax3.set_xlabel('F (Frequency Component k)')
+        ax3.set_ylabel('Amplitude')
+        ax3.set_xlim(0, max_k)
         ax3.legend()
         ax3.grid(True, alpha=0.3)
         
         # 子图4: 场景2误差演化
         ax4 = fig.add_subplot(gs[1, 1])
         data2 = results['Scenario_2_HighFreqBias'][kernel_size]['error_history'].T
-        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=0, vmax=1.0)
+        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=np.min(data2), vmax=np.max(data2))
         ax4.set_title('场景 2 相对误差')
         ax4.set_xlabel('评估步骤 (Epoch Step)')
         ax4.set_ylabel('关键频率 (k1, k2, k3)')
         ax4.set_yticks([0, 1, 2])
-        ax4.set_yticklabels([f'k={KEY_FREQS[0]}', f'k={KEY_FREQS[1]}', f'k={KEY_FREQS[2]}'])
+        ax4.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
         
         # 添加共享的颜色条
         cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
