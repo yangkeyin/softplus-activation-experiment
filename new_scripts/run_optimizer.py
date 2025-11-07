@@ -21,7 +21,7 @@ SEEDS = [100, 200, 300]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-OUTPUT_DIR = f"figures/optimizer/Adagrad_lr0.1_1028/"
+OUTPUT_DIR = f"figures/optimizer/AdamW_lr0.0005_wd0.01_1105/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 class FNNModel(nn.Module):
@@ -163,7 +163,7 @@ def main():
 
             # 训练模型
             criterion = nn.MSELoss()
-            optimizer = torch.optim.Adagrad(model.parameters(), lr=0.1)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
             num_epochs = EPOCHS
             for epoch in range(num_epochs):
                 model.train()

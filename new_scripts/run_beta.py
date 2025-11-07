@@ -1,28 +1,29 @@
-from re import X
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.utils.validation import sp
-from sympy import li
 import torch
 import torch.nn as nn
-from sklearn.model_selection import train_test_split
 import os
 import sys
+import pickle
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils import rescale, get_fq_coef
 
-BETA = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,20.0]
+# 配置参数
+BETA = [1.0, 4.0, 8.0, 16.0]
 TARGET_FUNC = lambda x: torch.sin(x)
-# TARGET_FUNC = lambda x: (x+0.8) * np.arcsin(np.sin(2*x*x+5*x))
 DATA_RANGE = [-2 * np.pi, 2 * np.pi]
 EPOCHS = 10000
 SEEDS = [100, 200, 300, 400, 500]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
-
-OUTPUT_DIR = f"figures/beta/1028_BetaRange1to20_noseed/"
+# 输出目录配置 - 修改为符合微调脚本要求的结构
+OUTPUT_DIR = "figures/beta_base"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+# 创建模型保存目录
+MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 class FNNModel(nn.Module):
     def __init__(self, n, beta):
@@ -131,6 +132,14 @@ def main():
     y_test_sorted = y_test[sorted_indices]
     # 移动数据到GPU
     x_train, y_train, x_test, y_test = x_train.to(DEVICE), y_train.to(DEVICE), x_test_sorted.to(DEVICE), y_test_sorted.to(DEVICE)
+    
+    # 初始化基线结果字典 - 符合微调脚本要求的结构
+    results_base = {
+        'x_train': x_train.cpu().numpy(),
+        'y_train': y_train.cpu().numpy(),
+        'x_test': x_test.cpu().numpy(),
+        'y_test': y_test.cpu().numpy()
+    }
 
     # 利用正交多项式计算频谱
     normalized_target = lambda x: TARGET_FUNC(torch.tensor(rescale(x, DATA_RANGE), dtype=torch.float32)).cpu().detach().numpy().flatten()
@@ -141,21 +150,28 @@ def main():
     color_map = {beta: beta_colors[i] for i, beta in enumerate(BETA)}
 
 
-    #将每个beta下每个模型的训练结果rms存储在一个列表中
+    # 初始化存储训练结果的字典
     rms_data = {}
+    # 初始化基线模型结果字典 - 按[beta][seed][epoch]组织
+    baseline_metrics = {beta: {} for beta in BETA}
+    
     # 为每一个beta值训练一个模型
     for beta in BETA:
         print(f"Training beta={beta}")
         results = {}
         rms_data[beta] = {}
-        #定义输出目录
+        baseline_metrics[beta] = {}
+        
+        # 定义输出目录
         output_dir = f"{OUTPUT_DIR}/beta_{beta}/"
         os.makedirs(output_dir, exist_ok=True)
+        
         for seed in SEEDS:
             print(f"Training beta={beta}, seed={seed}")
             set_seed(seed)
             results[seed] = {}
             rms_data[beta][seed] = {}
+            baseline_metrics[beta][seed] = {}
 
             # 搭建模型
             model = FNNModel(n=100, beta=beta)
@@ -204,6 +220,21 @@ def main():
                     rms_data[beta][seed][epoch + 1]["train_rms"] = train_rms
                     rms_data[beta][seed][epoch + 1]["test_rms"] = test_rms
                     rms_data[beta][seed][epoch + 1]["spectrum_error"] = spectrum_error
+                    
+                    # 保存基线指标 - 符合微调脚本要求的格式
+                    baseline_metrics[beta][seed][epoch + 1] = {
+                        "test_rms_base": test_rms,
+                        "spectrum_error_base": spectrum_error,
+                        "y_pred_test_base": y_pred_test.cpu().detach().numpy().flatten(),
+                        "y_pred_train_base": y_pred.cpu().detach().numpy().flatten(),
+                        "pred_coef_base": pred_coef
+                    }
+                    
+                    # 保存模型 - 如果达到基线epoch
+                    if epoch + 1 == BASELINE_EPOCH:
+                        model_path = os.path.join(MODELS_DIR, f"model_beta_{beta}_seed_{seed}_epoch_{BASELINE_EPOCH}.pth")
+                        torch.save(model.state_dict(), model_path)
+                        print(f"Saved model to {model_path}")
 
         # 可视化训练结果
         plot_each_epoch(results, x_train.cpu().numpy().flatten(), y_train.cpu().numpy().flatten(), x_test.cpu().numpy().flatten(), y_test.cpu().numpy().flatten(), true_coef, beta, output_dir)
@@ -262,6 +293,19 @@ def main():
     fig_seed.savefig(f"{OUTPUT_DIR}/beta_rms_seed.png")
     plt.close(fig_seed)  # 关闭当前figure，释放内存
     print(f"RMS plot saved to {OUTPUT_DIR}/beta_rms_seed.png")
+    
+    # 保存基线结果 - 包含所有必要的信息供微调脚本使用
+    results_base['BETA'] = BETA
+    results_base['SEEDS'] = SEEDS
+    results_base['BASELINE_EPOCH'] = BASELINE_EPOCH
+    results_base['true_coef'] = true_coef
+    results_base['metrics'] = baseline_metrics
+    
+    # 保存基线结果到pkl文件
+    baseline_file = os.path.join(OUTPUT_DIR, "results_base.pkl")
+    with open(baseline_file, 'wb') as f:
+        pickle.dump(results_base, f)
+    print(f"Saved baseline results to {baseline_file}")
 
 
 if __name__ == "__main__":
