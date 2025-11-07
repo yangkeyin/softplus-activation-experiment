@@ -1,0 +1,366 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from src.utils import get_fq_coef, rescale
+
+# --- 配置 ---
+# 确保结果可复现
+np.random.seed(42)
+torch.manual_seed(42)
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体设置
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
+# 设置设备为GPU（如果可用）
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f'使用设备: {DEVICE}')
+
+# 数据配置
+DATA_RANGE = [-4 * np.pi, 4 * np.pi]
+N_POINTS = 200  # 信号长度
+KEY_FREQS = [1.0, 5.0, 10.0]  # k1, k2, k3 - 关键频率
+NOISE_LEVEL = 0.1
+
+# 振幅配置（核心）
+AMPS_SCENARIO_1 = [1.5, 1.0, 0.5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
+AMPS_SCENARIO_2 = [0.5, 1.0, 1.5]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
+
+# 实验配置
+KERNEL_SIZES_TO_TEST = [3, 25]  # 对比 "高通" vs "低通" 两种极端情况
+EPOCHS = 2000
+EVAL_STEP = 50  # 每50个epoch评估一次相对误差
+LR = 0.001
+N_SAMPLES_TRAIN = 2000
+N_SAMPLES_TEST = 400
+SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
+
+# 输出目录
+OUTPUT_DIR = './figures/CNN_freq_bias'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+# --- 模型定义 ---
+class Simple1DCNN(nn.Module):
+    def __init__(self, kernel_size):
+        super(Simple1DCNN, self).__init__()
+        # 确保卷积后的长度不变
+        padding = (kernel_size - 1) // 2
+        
+        self.conv_stack = nn.Sequential(
+            # 输入: (Batch, 1, Length)
+            nn.Conv1d(in_channels=1, out_channels=16, 
+                      kernel_size=kernel_size, padding=padding),
+            nn.ReLU(),
+            nn.Conv1d(in_channels=16, out_channels=32, 
+                      kernel_size=kernel_size, padding=padding),
+            nn.ReLU()
+        )
+        
+        # 使用一个1x1卷积（等效于全连接）来聚合通道
+        self.output_layer = nn.Conv1d(in_channels=32, out_channels=1, 
+                                      kernel_size=1)
+        # 输出: (Batch, 1, Length)
+
+    def forward(self, x):
+        # x 形状: (Batch, 1, Length)
+        x = self.conv_stack(x)
+        x = self.output_layer(x)
+        return x
+
+
+# --- 数据生成函数 ---
+def generate_data_scenario(amps_list, key_freqs_list, n_samples):
+    """
+    生成指定场景的数据
+    
+    参数:
+    amps_list: 振幅列表
+    key_freqs_list: 关键频率列表
+    n_samples: 生成的样本数量
+    
+    返回:
+    (X_data, Y_data): 输入和目标数据，形状为 [N, 1, N_POINTS]
+    """
+    X = []
+    Y = []
+    
+    # 生成x轴
+    x_axis = torch.linspace(DATA_RANGE[0], DATA_RANGE[1], N_POINTS)
+    
+    # 循环生成样本
+    for _ in range(n_samples):
+        # 生成干净信号
+        y_signal = torch.zeros_like(x_axis)
+        for amp, freq in zip(amps_list, key_freqs_list):
+            phase = np.random.uniform(0, 2 * np.pi)
+            y_signal += amp * torch.sin(freq * x_axis + phase)
+        
+        # 添加噪声
+        noise = torch.randn_like(x_axis) * NOISE_LEVEL
+        
+        # 保存数据（添加批次和通道维度）
+        Y.append(y_signal.reshape(1, N_POINTS))
+        X.append((y_signal + noise).reshape(1, N_POINTS))
+    
+    # 转换为张量
+    X_data = torch.stack(X)
+    Y_data = torch.stack(Y)
+    
+    return X_data, Y_data
+
+
+# --- 辅助函数 ---
+def get_avg_spectrum(data_tensor):
+    """
+    计算数据张量的平均频谱
+    
+    参数:
+    data_tensor: 形状为 [N, 1, N_POINTS] 的数据张量
+    
+    返回:
+    avg_spectrum: 平均频谱系数的绝对值
+    """
+    # 转换为numpy数组并展平
+    data_np = data_tensor.cpu().numpy().reshape(-1, N_POINTS)
+    
+    # 计算每个样本的频谱
+    all_spectrums = []
+    for sample in data_np:
+        # 使用get_fq_coef获取频谱系数
+        # 注意：这里我们需要将numpy数组转换为函数
+        f = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), sample)
+        coef = get_fq_coef(f)
+        all_spectrums.append(np.abs(coef))
+    
+    # 计算平均频谱
+    avg_spectrum = np.mean(all_spectrums, axis=0)
+    return avg_spectrum
+
+def get_avg_relative_error(pred_tensor, target_tensor, key_indices):
+    """
+    计算在关键频率上的平均相对误差
+    
+    参数:
+    pred_tensor: 预测数据，形状为 [N, 1, N_POINTS]
+    target_tensor: 目标数据，形状为 [N, 1, N_POINTS]
+    key_indices: 关键频率的索引列表
+    
+    返回:
+    avg_errors: 每个关键频率的平均相对误差
+    """
+    errors = []
+    
+    # 对每个样本计算频谱误差
+    for i in range(pred_tensor.shape[0]):
+        # 获取预测和目标的频谱
+        f_pred = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), pred_tensor[i, 0].cpu().numpy())
+        f_target = lambda x: np.interp(x, np.linspace(-1, 1, N_POINTS), target_tensor[i, 0].cpu().numpy())
+        
+        pred_coef = get_fq_coef(f_pred)
+        target_coef = get_fq_coef(f_target)
+        
+        # 计算关键频率的相对误差
+        rel_errors = []
+        for idx in key_indices:
+            if np.abs(target_coef[idx]) > 1e-10:  # 避免除以零
+                rel_error = np.abs(pred_coef[idx] - target_coef[idx]) / np.abs(target_coef[idx])
+            else:
+                rel_error = np.abs(pred_coef[idx] - target_coef[idx])
+            rel_errors.append(rel_error)
+        
+        errors.append(rel_errors)
+    
+    # 计算平均误差
+    avg_errors = np.mean(errors, axis=0)
+    return avg_errors
+
+def get_key_frequency_indices(key_freqs, n_points, data_range):
+    """
+    根据关键频率计算它们在频谱中的索引
+    
+    参数:
+    key_freqs: 关键频率列表
+    n_points: 信号长度
+    data_range: 数据范围
+    
+    返回:
+    key_indices: 关键频率的索引列表
+    """
+    # 频率分辨率
+    freq_resolution = (key_freqs[-1] * 2) / (n_points - 1)
+    
+    # 计算索引（近似）
+    key_indices = []
+    for freq in key_freqs:
+        # 映射频率到索引
+        idx = int(freq / freq_resolution)
+        key_indices.append(idx)
+    
+    return key_indices
+
+
+# --- 主实验函数 ---
+def main():
+    # 初始化结果字典
+    results = {}
+    
+    # 计算关键频率索引
+    key_indices = get_key_frequency_indices(KEY_FREQS, N_POINTS, DATA_RANGE)
+    print(f"关键频率索引: {key_indices}")
+    
+    # 外层循环（遍历场景）
+    for scenario_name, amps in SCENARIOS.items():
+        print(f"--- 运行场景: {scenario_name} ---")
+        results[scenario_name] = {}
+        
+        # 生成数据
+        print(f"  生成训练数据 ({N_SAMPLES_TRAIN} 样本)...")
+        X_train, Y_train = generate_data_scenario(amps, KEY_FREQS, N_SAMPLES_TRAIN)
+        print(f"  生成测试数据 ({N_SAMPLES_TEST} 样本)...")
+        X_test, Y_test = generate_data_scenario(amps, KEY_FREQS, N_SAMPLES_TEST)
+        
+        # 将数据移到设备上
+        X_train, Y_train = X_train.to(DEVICE), Y_train.to(DEVICE)
+        X_test, Y_test = X_test.to(DEVICE), Y_test.to(DEVICE)
+        
+        # 计算参考频谱
+        print("  计算参考频谱...")
+        avg_target_spectrum = get_avg_spectrum(Y_test)
+        avg_input_spectrum = get_avg_spectrum(X_test)
+        results[scenario_name]['avg_target_spectrum'] = avg_target_spectrum
+        results[scenario_name]['avg_input_spectrum'] = avg_input_spectrum
+        
+        # 内层循环（遍历Kernel）
+        for kernel_size in KERNEL_SIZES_TO_TEST:
+            print(f"--- 正在测试 Kernel Size = {kernel_size} ---")
+            
+            # 初始化模型
+            model = Simple1DCNN(kernel_size=kernel_size).to(DEVICE)
+            optimizer = optim.Adam(model.parameters(), lr=LR)
+            criterion = nn.MSELoss()
+            
+            error_history = []
+            
+            # 训练模型
+            print(f"  开始训练 (EPOCHS={EPOCHS})...")
+            for epoch in range(EPOCHS):
+                model.train()
+                
+                # 前向传播
+                Y_pred = model(X_train)
+                loss = criterion(Y_pred, Y_train)
+                
+                # 反向传播
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                # 周期性评估
+                if (epoch + 1) % EVAL_STEP == 0:
+                    model.eval()
+                    with torch.no_grad():
+                        Y_pred_test = model(X_test)
+                        avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices)
+                        error_history.append(avg_errors)
+                    
+                    if (epoch + 1) % 200 == 0:
+                        print(f"    Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.6f}, "
+                              f"关键频率误差: {avg_errors}")
+            
+            # 保存最终结果
+            model.eval()
+            with torch.no_grad():
+                Y_pred_final = model(X_test)
+                test_mse = criterion(Y_pred_final, Y_test).item()
+                avg_pred_spectrum_final = get_avg_spectrum(Y_pred_final)
+            
+            results[scenario_name][kernel_size] = {
+                'test_mse': test_mse,
+                'avg_pred_spectrum': avg_pred_spectrum_final,
+                'error_history': np.array(error_history)
+            }
+            
+            print(f"  Kernel Size={kernel_size} 完成! 测试MSE: {test_mse:.6f}")
+    
+    # 可视化结果
+    visualize_results(results)
+    
+    print("实验完成!")
+    return results
+
+
+# --- 可视化函数 ---
+def visualize_results(results):
+    """
+    可视化实验结果
+    """
+    for kernel_size in KERNEL_SIZES_TO_TEST:
+        # 创建图表
+        fig = plt.figure(figsize=(12, 10))
+        gs = fig.add_gridspec(2, 2)
+        
+        # 子图1: 场景1频谱
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.semilogy(results['Scenario_1_LowFreqBias']['avg_input_spectrum'], 'b--', label='Input')
+        ax1.semilogy(results['Scenario_1_LowFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
+        ax1.semilogy(results['Scenario_1_LowFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
+                    label=f'Forecasting (k={kernel_size})')
+        ax1.set_title('场景 1 (低频偏置) 频谱')
+        ax1.set_xlabel('频率 k')
+        ax1.set_ylabel('|频谱系数|')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # 子图2: 场景1误差演化
+        ax2 = fig.add_subplot(gs[1, 0])
+        data1 = results['Scenario_1_LowFreqBias'][kernel_size]['error_history'].T
+        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=0, vmax=1.0)
+        ax2.set_title('场景 1 相对误差')
+        ax2.set_xlabel('评估步骤 (Epoch Step)')
+        ax2.set_ylabel('关键频率 (k1, k2, k3)')
+        ax2.set_yticks([0, 1, 2])
+        ax2.set_yticklabels([f'k={KEY_FREQS[0]}', f'k={KEY_FREQS[1]}', f'k={KEY_FREQS[2]}'])
+        
+        # 子图3: 场景2频谱
+        ax3 = fig.add_subplot(gs[0, 1])
+        ax3.semilogy(results['Scenario_2_HighFreqBias']['avg_input_spectrum'], 'b--', label='Input')
+        ax3.semilogy(results['Scenario_2_HighFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
+        ax3.semilogy(results['Scenario_2_HighFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
+                    label=f'Forecasting (k={kernel_size})')
+        ax3.set_title('场景 2 (高频偏置) 频谱')
+        ax3.set_xlabel('频率 k')
+        ax3.set_ylabel('|频谱系数|')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # 子图4: 场景2误差演化
+        ax4 = fig.add_subplot(gs[1, 1])
+        data2 = results['Scenario_2_HighFreqBias'][kernel_size]['error_history'].T
+        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=0, vmax=1.0)
+        ax4.set_title('场景 2 相对误差')
+        ax4.set_xlabel('评估步骤 (Epoch Step)')
+        ax4.set_ylabel('关键频率 (k1, k2, k3)')
+        ax4.set_yticks([0, 1, 2])
+        ax4.set_yticklabels([f'k={KEY_FREQS[0]}', f'k={KEY_FREQS[1]}', f'k={KEY_FREQS[2]}'])
+        
+        # 添加共享的颜色条
+        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+        fig.colorbar(im1, cax=cbar_ax, label='相对误差')
+        
+        # 设置主标题
+        plt.suptitle(f'CNN 偏见分析 - Kernel Size = {kernel_size}', fontsize=16)
+        plt.tight_layout(rect=[0, 0, 0.92, 0.96])
+        
+        # 保存图表
+        filename = os.path.join(OUTPUT_DIR, f'cnn_bias_k{kernel_size}_comparison.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"保存图表到: {filename}")
+        
+        # 显示图表
+        plt.close()
+
+
+if __name__ == "__main__":
+    main()
