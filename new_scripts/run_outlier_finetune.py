@@ -13,10 +13,10 @@ from src.utils import rescale, get_fq_coef
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MAX_FINETUNE_EPOCHS = 1000
 FINETUNE_LR = 0.0001
-FINETUNE_EVAL_STEP = 10
+FINETUNE_EVAL_STEP = 100
 
 # 输出目录配置
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_1"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
 
 # 异常点情景配置
@@ -71,6 +71,11 @@ def prepare_finetune_data(x_train_base, y_train_base, outlier_list, device, incl
         x_train_ft_scatter: 用于绘图的特征散点数据
         y_train_ft_scatter: 用于绘图的标签散点数据
     """
+    if include_original_data:
+        # 合并原始训练数据和异常点
+        print("包含原始训练数据")
+    else:
+        print("只使用异常点数据")
     # 转换异常点为张量
     x_outliers = torch.tensor([[x] for x, _ in outlier_list], dtype=torch.float32).to(device)
     y_outliers = torch.tensor([[y] for _, y in outlier_list], dtype=torch.float32).to(device)
@@ -236,16 +241,16 @@ def main():
                     if (epoch + 1) % FINETUNE_EVAL_STEP == 0:
                         print(f"      微调 epoch {epoch+1}/{MAX_FINETUNE_EPOCHS}, Loss: {loss.item():.6f}")
                         
-                        # 计算所有指标 - 包括基础指标和数值反映指标
-                    metrics = calculate_metrics(model, x_train_ft, y_train_ft, y_train, x_test, y_test, 
-                                              y_pred_test_base, outlier_list, true_coef, normalized_pred_func)
+                            # 计算所有指标 - 包括基础指标和数值反映指标
+                        metrics = calculate_metrics(model, x_train_ft, y_train_ft, y_train, x_test, y_test, 
+                                                y_pred_test_base, outlier_list, true_coef, normalized_pred_func)
+                            
+                        # 保存微调训练集散点数据
+                        metrics['x_train_ft_scatter'] = x_train_ft_scatter
+                        metrics['y_train_ft_scatter'] = y_train_ft_scatter
                         
-                    # 保存微调训练集散点数据
-                    metrics['x_train_ft_scatter'] = x_train_ft_scatter
-                    metrics['y_train_ft_scatter'] = y_train_ft_scatter
-                    
-                    # 保存结果
-                    finetune_results[beta][seed][scenario_name][epoch + 1] = metrics
+                        # 保存结果
+                        finetune_results[beta][seed][scenario_name][epoch + 1] = metrics
     
     # 保存微调结果
     # 确保所有必需的指标都被保存，包括基线预测结果

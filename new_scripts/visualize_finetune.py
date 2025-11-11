@@ -6,7 +6,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 输出目录配置 - 与 PRP 保持一致
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_1"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
 # 字体设置 - 解决中文显示和负号显示问题
 # 使用Windows系统常见的中文字体，避免大量字体查找错误
@@ -17,8 +17,8 @@ plt.rcParams['axes.unicode_minus'] = False  # 确保负号显示正常
 
 def load_results():
     """加载基线和微调结果"""
-    baseline_file = "figures/beta_base/results_base.pkl"
-    finetune_file = "figures/beta_finetune/results_finetune.pkl"
+    baseline_file = os.path.join("figures/beta_base", "results_base.pkl")
+    finetune_file = os.path.join(FINETUNE_OUTPUT_DIR, "results_finetune.pkl")
     
     if not os.path.exists(baseline_file):
         print(f"错误：找不到基线结果文件 {baseline_file}")
