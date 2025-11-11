@@ -19,14 +19,14 @@ print(f'使用设备: {DEVICE}')
 # 数据配置
 N_POINTS = 200  # 信号长度
 KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
-NOISE_LEVEL = 0.5
+NOISE_LEVEL = 0.1
 
 # 振幅配置（核心）
 AMPS_SCENARIO_1 = [1.5, 1.0, 0.5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
 AMPS_SCENARIO_2 = [0.5, 1.0, 1.5]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
 
 # 实验配置
-KERNEL_SIZES_TO_TEST = [3, 25]  # 对比 "高通" vs "低通" 两种极端情况
+KERNEL_SIZES_TO_TEST = [3, 25, 35]  # 对比 "高通" vs "低通" 两种极端情况
 EPOCHS = 2000
 EVAL_STEP = 50  # 每50个epoch评估一次相对误差
 LR = 0.001
@@ -35,7 +35,7 @@ N_SAMPLES_TEST = 400
 SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
 
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias_denoise'
+OUTPUT_DIR = './figures/CNN_freq_bias_denoise_3kernel_noiselevel0.1'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 

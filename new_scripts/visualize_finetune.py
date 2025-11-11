@@ -6,10 +6,12 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 输出目录配置 - 与 PRP 保持一致
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体设置
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+# 字体设置 - 解决中文显示和负号显示问题
+# 使用Windows系统常见的中文字体，避免大量字体查找错误
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False  # 确保负号显示正常
 
 
 

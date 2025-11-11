@@ -16,7 +16,7 @@ FINETUNE_LR = 0.0001
 FINETUNE_EVAL_STEP = 10
 
 # 输出目录配置
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
 
 # 异常点情景配置

@@ -17,29 +17,29 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'使用设备: {DEVICE}')
 
 # 数据配置 - 预测长度 = 历史长度 (L=H)
-SEQ_LEN = 200  # 历史序列长度 L
-PRED_LEN = 200  # 预测序列长度 H, H = L
+SEQ_LEN = 250  # 历史序列长度 L
+PRED_LEN = 250  # 预测序列长度 H, H = L
 TOTAL_SERIES_LENGTH = 10000  # 用于生成窗口的原始序列总长
 N_POINTS = SEQ_LEN  # 为了兼容原有代码
 KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
-NOISE_LEVEL = 0.1
+NOISE_LEVEL = 5
 
 # 振幅配置（核心）
 AMPS_SCENARIO_1 = [15, 10, 5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
 AMPS_SCENARIO_2 = [5, 10, 15]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
 
 # 实验配置
-KERNEL_SIZES_TO_TEST = [3, 25]  # 对比 "高通" vs "低通" 两种极端情况
-EPOCHS = 2000
-EVAL_STEP = 50  # 每50个epoch评估一次相对误差
-LR = 0.001
+KERNEL_SIZES_TO_TEST = [3, 25, 35]  # 对比 "高通" vs "低通" 两种极端情况
+EPOCHS = 20
+EVAL_STEP = 1  # 每50个epoch评估一次相对误差
+LR = 0.0001
 BATCH_SIZE = 64  # 批量大小
 N_SAMPLES_TRAIN = 2000
 N_SAMPLES_TEST = 400
 SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
 
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias_FORECAST_L200'
+OUTPUT_DIR = './figures/CNN_freq_bias_amp5-15_noiselevel5_epo20'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -322,7 +322,7 @@ def main():
                         avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices_k)
                         error_history.append(avg_errors)
                     
-                    if (epoch + 1) % 200 == 0:
+                    if (epoch + 1) % 1 == 0:
                         print(f"    Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss:.6f}, "
                               f"关键频率误差: {avg_errors}")
             

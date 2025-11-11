@@ -20,16 +20,16 @@ def set_seed(seed_value):
     random.seed(seed_value)
 
 # 配置参数
-BETA = [1.0, 4.0, 8.0, 16.0]
+BETA = [0.25, 0.5, 1.0, 4.0, 8.0, 16.0]
 TARGET_FUNC_2D = lambda x, y: x**2 + y**2
 DATA_RANGE = [-2 * np.pi, 2 * np.pi]
 EPOCHS = 10000
-SEEDS = [100, 200, 300, 400, 500]
+SEEDS = [100, 200, 300]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
-OUTPUT_DIR = "figures/beta_2D_x2ADDy2"
+OUTPUT_DIR = "figures/beta_2D_x2ADDy2_SGD_momentum0.9_lr0.002"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 创建模型保存目录
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -206,7 +206,7 @@ def main():
 
             # 训练模型
             criterion = nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.002, momentum=0.9)
             num_epochs = EPOCHS
             for epoch in range(num_epochs):
                 model.train()
@@ -216,7 +216,7 @@ def main():
                 loss.backward()
                 optimizer.step()
 
-                if (epoch+1) % 1000 == 0:
+                if (epoch+1) % 100 == 0:
                     rms_data[beta][seed][epoch + 1] = {}
                     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.6f}")
 

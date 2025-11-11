@@ -452,8 +452,8 @@ def run_figure_2a():
     # 场景 1 (左图): 振幅 k1 > k2 > k3
      # [cite: 171] 论文中描述 $a_{k1}<a_{k2}<a_{k3}$，但左图显示 k1 振幅最高。
     # 我们复现图表所显示的视觉效果。
-    print("运行场景 1 (左图): Amp(k1) = Amp(k2) = Amp(k3)")
-    amps_left = [10.0, 10.0, 10.0]
+    print("运行场景 1 (左图): Amp(k1) > Amp(k2) > Amp(k3)")
+    amps_left = [15.0, 10.0, 5.0]
     # 计算用于 N=10000 数据生成的"工厂频率"
     # f = k_lab / N_lab = k_factory / N_factory
     # k_factory = (k_lab / N_lab) * N_factory
@@ -471,8 +471,8 @@ def run_figure_2a():
     
     # 场景 2 (右图): 振幅 k1 < k2 < k3
      # [cite: 185] "synthetic data with higher amplitudes in the mid and high-frequency ranges"
-    print("运行场景 2 (右图): Amp(k1) = Amp(k2) = Amp(k3)")
-    amps_right = [10.0, 10.0, 10.0]
+    print("运行场景 2 (右图): Amp(k1) < Amp(k2) < Amp(k3)")
+    amps_right = [5.0, 10.0, 15.0]
     # 计算用于 N=10000 数据生成的"工厂频率"
     data_gen_freqs_right = [(k / SEQ_LEN) * 10000 for k in key_freqs_2a]
     data_right = generate_time_series(10000, amps_right, data_gen_freqs_right, noise_level=5.0)
