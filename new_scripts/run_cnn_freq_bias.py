@@ -9,7 +9,7 @@ import os
 # 确保结果可复现
 np.random.seed(42)
 torch.manual_seed(42)
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体设置
+plt.rcParams['font.sans-serif'] =  ['Microsoft YaHei']  # 中文字体设置
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # 设置设备为GPU（如果可用）
@@ -22,24 +22,27 @@ PRED_LEN = 250  # 预测序列长度 H, H = L
 TOTAL_SERIES_LENGTH = 10000  # 用于生成窗口的原始序列总长
 N_POINTS = SEQ_LEN  # 为了兼容原有代码
 KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
-NOISE_LEVEL = 5
+NOISE_LEVEL = 0.5
 
 # 振幅配置（核心）
-AMPS_SCENARIO_1 = [15, 10, 5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
-AMPS_SCENARIO_2 = [5, 10, 15]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
+AMPS_SCENARIO_1 = [1.5, 1.0, 0.5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
+AMPS_SCENARIO_2 = [0.5, 1.0, 1.5]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
 
 # 实验配置
 KERNEL_SIZES_TO_TEST = [3, 25, 35]  # 对比 "高通" vs "低通" 两种极端情况
-EPOCHS = 20
+EPOCHS = 2000
 EVAL_STEP = 1  # 每50个epoch评估一次相对误差
-LR = 0.0001
+LR = 0.001
 BATCH_SIZE = 64  # 批量大小
 N_SAMPLES_TRAIN = 2000
 N_SAMPLES_TEST = 400
 SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
 
+# 可视化配置
+NUM_XTICKS = 10  # x轴显示的刻度数量
+
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias_amp5-15_noiselevel5_epo20'
+OUTPUT_DIR = './figures/CNN_freq_bias_denoise_amp0.5-1.5_epo2000_noiselevel0.5'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -209,13 +212,17 @@ def get_avg_spectrum(data_tensor):
     """
     # 转换为numpy数组并展平
     data_np = data_tensor.cpu().numpy().squeeze()  # 形状 [N_samples, N_POINTS]
-    
     # 计算FFT
     fft_data = np.fft.fft(data_np, axis=1)
     fft_mag = np.abs(fft_data)
     
     # 计算平均频谱并只返回正频率部分
     avg_fft_mag = np.mean(fft_mag, axis=0)
+    ax[1].plot(avg_fft_mag[:N_POINTS // 2])
+    ax[1].set_title('Average FFT Spectrum')
+    ax[1].set_ylabel('Amplitude')
+    fig.tight_layout()
+    fig.show()
     return avg_fft_mag[:N_POINTS // 2]
 
 def get_avg_relative_error(pred_tensor, target_tensor, key_indices_k):
@@ -321,8 +328,6 @@ def main():
                         Y_pred_test = model(X_test)
                         avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices_k)
                         error_history.append(avg_errors)
-                    
-                    if (epoch + 1) % 1 == 0:
                         print(f"    Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss:.6f}, "
                               f"关键频率误差: {avg_errors}")
             
@@ -378,12 +383,17 @@ def visualize_results(results):
         # 子图2: 场景1误差演化
         ax2 = fig.add_subplot(gs[1, 0])
         data1 = results['Scenario_1_LowFreqBias'][kernel_size]['error_history'].T
-        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=np.min(data1), vmax=np.max(data1))
+        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=0, vmax=0.95)
         ax2.set_title('场景 1 相对误差')
-        ax2.set_xlabel('评估步骤 (Epoch Step)')
+        ax2.set_xlabel('Epoch')
         ax2.set_ylabel('关键频率 (k1, k2, k3)')
         ax2.set_yticks([0, 1, 2])
         ax2.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
+        # 精简x轴标签，避免过多
+        epoch_labels = np.arange(EVAL_STEP, EPOCHS+1, EVAL_STEP)
+        step = max(1, len(epoch_labels) // NUM_XTICKS)
+        ax2.set_xticks(np.arange(0, len(epoch_labels), step))
+        ax2.set_xticklabels(epoch_labels[::step])
         
         # 子图3: 场景2频谱
         ax3 = fig.add_subplot(gs[0, 1])
@@ -401,12 +411,17 @@ def visualize_results(results):
         # 子图4: 场景2误差演化
         ax4 = fig.add_subplot(gs[1, 1])
         data2 = results['Scenario_2_HighFreqBias'][kernel_size]['error_history'].T
-        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=np.min(data2), vmax=np.max(data2))
+        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=0, vmax=0.95)
         ax4.set_title('场景 2 相对误差')
-        ax4.set_xlabel('评估步骤 (Epoch Step)')
+        ax4.set_xlabel('Epoch')
         ax4.set_ylabel('关键频率 (k1, k2, k3)')
         ax4.set_yticks([0, 1, 2])
         ax4.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
+        # 精简x轴标签，避免过多
+        epoch_labels = np.arange(EVAL_STEP, EPOCHS+1, EVAL_STEP)
+        step = max(1, len(epoch_labels) // NUM_XTICKS)
+        ax4.set_xticks(np.arange(0, len(epoch_labels), step))
+        ax4.set_xticklabels(epoch_labels[::step])
         
         # 添加共享的颜色条
         cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])

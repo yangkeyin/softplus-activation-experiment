@@ -9,7 +9,7 @@ import os
 # 确保结果可复现
 np.random.seed(42)
 torch.manual_seed(42)
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体设置
+plt.rcParams['font.sans-serif'] =  ['Microsoft YaHei']  # 中文字体设置
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # 设置设备为GPU（如果可用）
@@ -18,24 +18,25 @@ print(f'使用设备: {DEVICE}')
 
 # 数据配置
 N_POINTS = 200  # 信号长度
-KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
-NOISE_LEVEL = 0.1
+KEY_FREQS_K = [15, 30, 40]  # k1, k2, k3 - 关键频率分量k
+NOISE_LEVEL = 5
 
 # 振幅配置（核心）
-AMPS_SCENARIO_1 = [1.5, 1.0, 0.5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
-AMPS_SCENARIO_2 = [0.5, 1.0, 1.5]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
+AMPS_SCENARIO_1 = [15, 10, 5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
+AMPS_SCENARIO_2 = [5, 10, 15]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
 
 # 实验配置
 KERNEL_SIZES_TO_TEST = [3, 25, 35]  # 对比 "高通" vs "低通" 两种极端情况
-EPOCHS = 2000
-EVAL_STEP = 50  # 每50个epoch评估一次相对误差
-LR = 0.001
+EPOCHS = 100
+EVAL_STEP = 20  # 每100个epoch评估一次相对误差
+LR = 0.0001
 N_SAMPLES_TRAIN = 2000
 N_SAMPLES_TEST = 400
 SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias": AMPS_SCENARIO_2}
 
+NUM_XTICKS = 10 
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias_denoise_3kernel_noiselevel0.1'
+OUTPUT_DIR = './figures/JUSTFOREXP'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -225,8 +226,6 @@ def main():
                         Y_pred_test = model(X_test)
                         avg_errors = get_avg_relative_error(Y_pred_test, Y_test, key_indices_k)
                         error_history.append(avg_errors)
-                    
-                    if (epoch + 1) % 200 == 0:
                         print(f"    Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.6f}, "
                               f"关键频率误差: {avg_errors}")
             
@@ -282,12 +281,19 @@ def visualize_results(results):
         # 子图2: 场景1误差演化
         ax2 = fig.add_subplot(gs[1, 0])
         data1 = results['Scenario_1_LowFreqBias'][kernel_size]['error_history'].T
-        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=np.min(data1), vmax=np.max(data1))
+        im1 = ax2.imshow(data1, aspect='auto', cmap='gray_r', vmin=0, vmax=0.95)
         ax2.set_title('场景 1 相对误差')
         ax2.set_xlabel('评估步骤 (Epoch Step)')
         ax2.set_ylabel('关键频率 (k1, k2, k3)')
         ax2.set_yticks([0, 1, 2])
         ax2.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
+        
+        # 精简x轴标签，避免过多
+        epoch_labels = np.arange(EVAL_STEP, EPOCHS+1, EVAL_STEP)
+        num_ticks = min(NUM_XTICKS, len(epoch_labels))
+        step = max(1, len(epoch_labels) // num_ticks)
+        ax2.set_xticks(np.arange(0, len(epoch_labels), step))
+        ax2.set_xticklabels(epoch_labels[::step])
         
         # 子图3: 场景2频谱
         ax3 = fig.add_subplot(gs[0, 1])
@@ -305,19 +311,26 @@ def visualize_results(results):
         # 子图4: 场景2误差演化
         ax4 = fig.add_subplot(gs[1, 1])
         data2 = results['Scenario_2_HighFreqBias'][kernel_size]['error_history'].T
-        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=np.min(data2), vmax=np.max(data2))
+        im2 = ax4.imshow(data2, aspect='auto', cmap='gray_r', vmin=0, vmax=0.95)
         ax4.set_title('场景 2 相对误差')
         ax4.set_xlabel('评估步骤 (Epoch Step)')
         ax4.set_ylabel('关键频率 (k1, k2, k3)')
         ax4.set_yticks([0, 1, 2])
         ax4.set_yticklabels([f'k={KEY_FREQS_K[0]}', f'k={KEY_FREQS_K[1]}', f'k={KEY_FREQS_K[2]}'])
         
+        # 精简x轴标签，避免过多
+        epoch_labels = np.arange(EVAL_STEP, EPOCHS+1, EVAL_STEP)
+        num_ticks = min(NUM_XTICKS, len(epoch_labels))
+        step = max(1, len(epoch_labels) // num_ticks)
+        ax4.set_xticks(np.arange(0, len(epoch_labels), step))
+        ax4.set_xticklabels(epoch_labels[::step])   
+        
         # 添加共享的颜色条
         cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
         fig.colorbar(im1, cax=cbar_ax, label='相对误差')
         
         # 设置主标题
-        plt.suptitle(f'CNN 偏见分析 - Kernel Size = {kernel_size}', fontsize=16)
+        plt.suptitle(f'CNN 偏见分析之去噪 - Kernel Size = {kernel_size}', fontsize=16)
         plt.tight_layout(rect=[0, 0, 0.92, 0.96])
         
         # 保存图表
