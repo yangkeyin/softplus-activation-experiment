@@ -11,12 +11,12 @@ from src.utils import rescale, get_fq_coef
 
 # 配置参数
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MAX_FINETUNE_EPOCHS = 1000
+MAX_FINETUNE_EPOCHS = 10000
 FINETUNE_LR = 0.0001
 FINETUNE_EVAL_STEP = 100
 
 # 输出目录配置
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_1"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_epo10000"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
 
 # 异常点情景配置
@@ -123,6 +123,7 @@ def calculate_metrics(model, x_train_ft, y_train_ft, y_train, x_test, y_test, y_
             x_tensor = torch.tensor([[x]], dtype=torch.float32).to(DEVICE)
             y_pred = model(x_tensor)
             local_errors.append(torch.abs(y_pred - y).item())
+            print(f"异常点 ({y:.4f}) 的预测值: {y_pred.item():.4f}, 误差: {torch.abs(y_pred - y).item():.4f}")
         local_fit_error = np.mean(local_errors)
         
         # 计算全局损伤（远场区域）
@@ -203,7 +204,7 @@ def main():
             
             # 获取基线预测结果
             baseline_metrics = results_base['metrics'][beta][seed][BASELINE_EPOCH]
-            y_pred_test_base = torch.tensor(baseline_metrics['y_pred_test_base'], dtype=torch.float32).to(DEVICE)
+            y_pred_test_base = torch.tensor(baseline_metrics['y_pred_test_base'].reshape(-1, 1), dtype=torch.float32).to(DEVICE)
             
             # 为模型创建归一化预测函数
             normalized_pred_func = lambda x: model(torch.tensor(rescale(x, [-2*np.pi, 2*np.pi]), 
