@@ -6,11 +6,11 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 输出目录配置 - 与 PRP 保持一致
-FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_1"
+FINETUNE_OUTPUT_DIR = "figures/beta_finetune_notinclude_epo10000"
 os.makedirs(FINETUNE_OUTPUT_DIR, exist_ok=True)
 # 字体设置 - 解决中文显示和负号显示问题
-# 使用Windows系统常见的中文字体，避免大量字体查找错误
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+# 使用支持负号的字体组合：优先使用DejaVu Sans（matplotlib默认，支持负号），然后中文字体
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False  # 确保负号显示正常
 
 
@@ -169,7 +169,7 @@ def generate_per_beta_plots(results_base, results_finetune, beta_values, scenari
                     N_train = len(results_base['x_train'])
                     N_outlier = len(scenarios[scenario_name])
                     N_test = len(x_test)
-                    ax1.set_title(f"Fitted Function (Train: {N_train}+{N_outlier}, Test: {N_test})")
+                    ax1.set_title(f"Fitted Function (Train: {N_outlier}, Test: {N_test})")
                     ax1.set_xlabel("x")
                     ax1.set_ylabel("y")
                     ax1.legend()
@@ -212,6 +212,7 @@ def generate_per_beta_plots(results_base, results_finetune, beta_values, scenari
                     ax3.set_ylabel("|Coefficient|")
                     ax3.legend()
                     ax3.grid(True)
+                    ax3.set_ylim(1e-9, 1e1)
                     
                     plt.tight_layout(rect=[0, 0, 1, 0.97])
                     plot_file = os.path.join(beta_dir, f"epoch_{epoch}.png")
@@ -300,7 +301,7 @@ def generate_summary_plots(results_base, results_finetune, beta_values, scenario
             if local_error_values:
                 local_error_values = np.array(local_error_values)
                 local_error_std = np.array(local_error_std)
-                ax3.plot(epochs, local_error_values, '-o', label=f"Beta={beta}", color=colors[i])
+                ax3.semilogy(epochs, local_error_values, '-o', label=f"Beta={beta}", color=colors[i])
                 ax3.fill_between(epochs, local_error_values - local_error_std, local_error_values + local_error_std, color=colors[i], alpha=0.2)
         ax3.set_title("Local Fit Error vs Finetune Epoch")
         ax3.set_xlabel("Finetune Epoch")
@@ -418,7 +419,7 @@ def main():
     
     print(f"检测到的异常点情景: {list(OUTLIER_SCENARIOS.keys())}")
     print("生成逐个Beta深度分析图表...")
-    generate_per_beta_plots(results_base, results_finetune, BETA, OUTLIER_SCENARIOS, MAX_FINETUNE_EPOCHS)
+    # generate_per_beta_plots(results_base, results_finetune, BETA, OUTLIER_SCENARIOS, MAX_FINETUNE_EPOCHS)
     
     print("生成全局汇总对比图表...")
     generate_summary_plots(results_base, results_finetune, BETA, OUTLIER_SCENARIOS, MAX_FINETUNE_EPOCHS)
