@@ -123,7 +123,6 @@ def calculate_metrics(model, x_train_ft, y_train_ft, y_train, x_test, y_test, y_
             x_tensor = torch.tensor([[x]], dtype=torch.float32).to(DEVICE)
             y_pred = model(x_tensor)
             local_errors.append(torch.abs(y_pred - y).item())
-            print(f"异常点 ({y:.4f}) 的预测值: {y_pred.item():.4f}, 误差: {torch.abs(y_pred - y).item():.4f}")
         local_fit_error = np.mean(local_errors)
         
         # 计算全局损伤（远场区域）
