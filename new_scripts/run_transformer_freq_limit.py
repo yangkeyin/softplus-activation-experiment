@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 import os
+import copy
 
 # 设置Matplotlib支持中文
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
@@ -19,28 +20,29 @@ torch.manual_seed(42)
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'使用设备: {DEVICE}')
 
-
-
 # 定义参数
 SEQ_LEN = 10      # 输入序列长度（条件重复次数）
-PRED_LEN = 100    # 预测序列长度（信号点数）
+PRED_LEN = 200    # 预测序列长度（信号点数）
+X_AXIS_PRED = np.linspace(0, 2 * np.pi, PRED_LEN)  # 固定的输出时间轴
 
-# 固定时间轴
-X_AXIS_PRED = np.linspace(0, 4 * np.pi, PRED_LEN)
+
 
 # 频率配置
-FREQS_TRAIN = [1.0, 2.0, 3.0, 5.0, 8.0, 10.0]  # 训练频率
-FREQS_TEST = [1.0, 3.0, 5.0, 8.0, 10.0, 12.0, 15.0, 20.0]  # 测试频率
+FREQS_TRAIN = [5.0, 10.0, 15.0]  # 训练频率
+FREQS_TEST = [1.0, 3.0, 5.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0]  # 测试频率
 
 # 训练参数
-EPOCHS = 50
+EPOCHS = 200
 BATCH_SIZE = 64
 LR = 0.0001
 N_SAMPLES_TRAIN = 5000
 N_SAMPLES_VAL = 1000
+N_SAMPLES_TEST = 10  # 测试样本数量
+SEEDS = [100, 200, 300, 400, 500]  # 多个随机种子
+EVAL_EVERY_N_EPOCHS = 10  # 每10个epoch评估一次
 
 # 输出目录
-OUTPUT_DIR = './figures/Transformer_freq_limit'
+OUTPUT_DIR = './figures/Transformer_freq_limit_epoch200_gap10_predlen200_2pi_valpi'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -107,7 +109,7 @@ def generate_data(n_samples, freqs_list, seq_len, pred_len, x_axis_pred, fixed_p
     freqs_list: 频率列表
     seq_len: 输入序列长度
     pred_len: 预测序列长度
-    x_axis_pred: 预测的时间轴
+    x_axis_pred: 固定的输出时间轴
     fixed_phase: 固定相位值（用于测试），默认为None
     
     返回:
@@ -126,11 +128,11 @@ def generate_data(n_samples, freqs_list, seq_len, pred_len, x_axis_pred, fixed_p
         else:
             phase = np.random.uniform(0, 2 * np.pi)
         
-        # 创建输入条件 [freq, phase]，在seq_len维度上重复
-        x_sample = np.tile([[freq, phase]], (seq_len, 1))
+        # 创建输入条件 [freq, phase]，重复seq_len次
+        x_sample = np.tile([freq, phase], (seq_len, 1))
         X.append(x_sample)
         
-        # 生成目标信号 y = sin(freq * x + phase)
+        # 生成目标信号 y = sin(freq * x_axis_pred + phase)
         y_sample = np.sin(freq * x_axis_pred + phase)[:, np.newaxis]
         Y.append(y_sample)
     
@@ -141,192 +143,292 @@ def generate_data(n_samples, freqs_list, seq_len, pred_len, x_axis_pred, fixed_p
     return TensorDataset(X_tensor, Y_tensor)
 
 
-# --- 训练函数 ---
-def train_model(model, train_loader, val_loader, criterion, optimizer, epochs):
+# --- 训练函数（修改为记录每个epoch的结果） ---
+def train_model_with_tracking(model, train_loader, val_loader, test_loaders, criterion, optimizer, epochs, seed):
     """
-    训练模型并保存最佳模型
+    训练模型并记录每个epoch的结果
     """
+
     best_val_loss = float('inf')
-    best_model_path = os.path.join(OUTPUT_DIR, 'best_freq_model.pth')
-    
+    best_model_path = os.path.join(OUTPUT_DIR, f'best_freq_model_seed{seed}.pth')
+
     train_losses = []
     val_losses = []
-    
+
+    epoch_mse_dict = {}
+    epoch_fit_dict = {}
+
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
-        
+
         for X_batch, Y_batch in train_loader:
             X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
-            
+
             # 前向传播
             Y_pred = model(X_batch)
             loss = criterion(Y_pred, Y_batch)
-            
+
             # 反向传播
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
+
             train_loss += loss.item() * X_batch.size(0)
-        
+
         # 计算平均训练损失
         train_loss /= len(train_loader.dataset)
-        train_losses.append(train_loss)
         
         # 验证
-        model.eval()
-        val_loss = 0.0
-        
-        with torch.no_grad():
-            for X_batch, Y_batch in val_loader:
-                X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
-                Y_pred = model(X_batch)
-                loss = criterion(Y_pred, Y_batch)
-                val_loss += loss.item() * X_batch.size(0)
-        
-        # 计算平均验证损失
-        val_loss /= len(val_loader.dataset)
-        val_losses.append(val_loss)
-        
-        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
-        
-        # 保存最佳模型
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), best_model_path)
-            print(f'保存新的最佳模型，验证损失: {best_val_loss:.6f}')
-    
-    # 绘制训练曲线
+        if (epoch + 1) % EVAL_EVERY_N_EPOCHS == 0:
+            model.eval()
+            val_loss = 0.0
+
+            with torch.no_grad():
+                for X_batch, Y_batch in val_loader:
+                    X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
+                    Y_pred = model(X_batch)
+                    loss = criterion(Y_pred, Y_batch)
+                    val_loss += loss.item() * X_batch.size(0)
+
+            # 计算平均验证损失
+            val_loss /= len(val_loader.dataset)
+            
+            # 每eval_step个epoch记录一次损失（包括第1和最后一个epoch）
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+
+            print(f'Seed {seed}, Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
+
+            # 保存最佳模型
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), best_model_path)
+                print(f'保存新的最佳模型，验证损失: {best_val_loss:.6f}')
+
+            # 在每个epoch后评估所有测试频率
+            epoch_mse_dict[epoch + 1] = {}
+            epoch_fit_dict[epoch + 1] = {}
+
+            for freq, test_loader in test_loaders.items():
+                with torch.no_grad():
+                    for X_batch, Y_batch in test_loader:
+                        X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
+                        Y_pred = model(X_batch)
+
+                        # 计算MSE
+                        mse = criterion(Y_pred, Y_batch).item()
+                        epoch_mse_dict[epoch + 1][freq] = mse
+                        epoch_fit_dict[epoch + 1][freq] = (Y_batch.cpu().numpy()[0], Y_pred.cpu().numpy()[0])
+
+    return train_losses, val_losses, epoch_mse_dict, epoch_fit_dict, best_model_path
+
+
+
+# --- 新的可视化函数 ---
+def plot_training_loss(all_train_losses, all_val_losses):
+    """
+    绘制训练损失图（平均和fillbetween）
+    仅在每10个epoch（以及第1和最后1个epoch）处有数据点
+    """
+    # 转换为numpy数组
+    train_losses_array = np.array(all_train_losses)  # (num_seeds, num_recorded_epochs)
+    val_losses_array = np.array(all_val_losses)
+
+    # 计算平均和标准差
+    train_mean = np.mean(train_losses_array, axis=0)
+    train_std = np.std(train_losses_array, axis=0)
+    val_mean = np.mean(val_losses_array, axis=0)
+    val_std = np.std(val_losses_array, axis=0)
+
+    # 构建对应的epoch号
+    # 因为eval_step = EVAL_EVERY_N_EPOCHS = 5，记录的epochs为: [5, 10, 15, ..., 50]
+    num_recorded = len(train_mean)
+    # 从 EVAL_EVERY_N_EPOCHS 开始，每隔 EVAL_EVERY_N_EPOCHS 记录一次
+    epochs = [i * EVAL_EVERY_N_EPOCHS for i in range(1, num_recorded + 1)]
+
     plt.figure(figsize=(10, 6))
-    plt.plot(range(1, epochs+1), train_losses, label='训练损失')
-    plt.plot(range(1, epochs+1), val_losses, label='验证损失')
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
+    plt.plot(epochs, train_mean, 'b-', label='训练损失 (平均)', marker='o', markersize=6)
+    plt.fill_between(epochs, train_mean - train_std, train_mean + train_std, alpha=0.3, color='blue')
+    plt.plot(epochs, val_mean, 'r-', label='验证损失 (平均)', marker='s', markersize=6)
+    plt.fill_between(epochs, val_mean - val_std, val_mean + val_std, alpha=0.3, color='red')
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('MSE Loss', fontsize=12)
     plt.yscale('log')
-    plt.legend()
-    plt.title('训练过程')
-    plt.savefig(os.path.join(OUTPUT_DIR, 'training_curve.png'))
+    plt.legend(fontsize=11)
+    plt.title('训练损失曲线 (多个种子平均)', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'training_loss.png'), dpi=150)
     plt.close()
-    
-    return best_model_path
 
 
-# --- 可视化函数 ---
-def plot_freq_mse_summary(results_mse, trained_freqs):
+def plot_mse_vs_freq_over_epochs(all_epoch_mses, freqs_test, freqs_train):
     """
-    绘制频率-误差总结图
+    绘制MSE vs Freq随epoch变化图
+    适配新的 all_epoch_mses 结构：list[dict[epoch][freq] -> mse]
     """
-    freqs = list(results_mse.keys())
-    mses = list(results_mse.values())
-    
-    # 确定颜色
-    colors = ['green' if freq in trained_freqs else 'red' for freq in freqs]
-    
-    plt.figure(figsize=(12, 6))
-    bars = plt.bar(range(len(freqs)), mses, color=colors)
-    plt.xlabel('频率')
-    plt.ylabel('均方误差 (MSE)')
+    # 收集所有种子、所有 epoch、所有频率的 MSE
+    # 先确定有哪些 epoch 被记录
+    recorded_epochs = sorted(all_epoch_mses[0].keys())  # 所有种子记录相同的 epoch 列表
+    n_epochs = len(recorded_epochs)
+    n_freqs = len(freqs_test)
+    n_seeds = len(all_epoch_mses)
+
+    # 构造三维数组: (n_seeds, n_epochs, n_freqs)
+    mse_array = np.zeros((n_seeds, n_epochs, n_freqs))
+    for s, seed_mses in enumerate(all_epoch_mses):
+        for e, epoch in enumerate(recorded_epochs):
+            for f, freq in enumerate(freqs_test):
+                mse_array[s, e, f] = seed_mses[epoch][freq]
+
+    # 计算跨种子的均值
+    mse_mean = np.mean(mse_array, axis=0)  # (n_epochs, n_freqs)
+
+    # 颜色映射
+    colors = plt.cm.viridis(np.linspace(0, 1, n_epochs))
+
+    plt.figure(figsize=(12, 8))
+    for e, epoch in enumerate(recorded_epochs):
+        plt.plot(freqs_test, mse_mean[e], 'o-',
+                 color=colors[e],
+                 label=f'Epoch {epoch}',
+                 markersize=6, linewidth=2)
+
+    # 标记训练频率
+    has_train_freq_label = False
+    for freq in freqs_train:
+        if freq in freqs_test:
+            plt.axvline(x=freq, color='green', linestyle='--', alpha=0.7,
+                        label='训练频率' if not has_train_freq_label else "")
+            has_train_freq_label = True
+
+    # 设置X轴刻度只显示实际的测试频率
+    plt.xticks(freqs_test, [f'{f:.1f}' for f in freqs_test], rotation=0)
+    plt.xlabel('测试频率', fontsize=12)
+    plt.ylabel('均方误差 (MSE)', fontsize=12)
     plt.yscale('log')
-    plt.title('不同频率下的模型性能')
-    plt.xticks(range(len(freqs)), freqs)
-    
-    # 添加图例
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='green', label='训练过的频率'),
-        Patch(facecolor='red', label='未见过的频率')
-    ]
-    plt.legend(handles=legend_elements)
-    
+    plt.title('MSE vs 频率 随训练进展变化', fontsize=14)
+    plt.legend(fontsize=10)
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'freq_limit_mse_summary.png'))
+    plt.savefig(os.path.join(OUTPUT_DIR, 'mse_vs_freq_over_epochs.png'), dpi=150)
     plt.close()
 
-def plot_fits(freqs, y_tests, y_preds, mses, x_axis_pred):
+
+def plot_freq_fits_per_epoch(all_epoch_fits, all_epoch_mses, freqs_test, x_axis_pred):
     """
-    绘制所有频率的拟合细节图
+    为每个频率创建单独的文件夹，为每个记录的epoch绘制拟合图
     """
-    n_freqs = len(freqs)
-    n_cols = 4
-    n_rows = (n_freqs + n_cols - 1) // n_cols
+    # 迭代每个记录的epoch
+    recorded_epochs = sorted(all_epoch_mses[0].keys())  # 从第一个种子的记录中获取所有epoch
     
-    plt.figure(figsize=(5 * n_cols, 4 * n_rows))
-    
-    for i, (freq, y_test, y_pred, mse) in enumerate(zip(freqs, y_tests, y_preds, mses)):
-        plt.subplot(n_rows, n_cols, i + 1)
-        plt.plot(x_axis_pred, y_test.flatten(), 'b-', label='真实信号')
-        plt.plot(x_axis_pred, y_pred.flatten(), 'r--', label='预测信号')
-        plt.xlabel('x')
-        plt.ylabel('幅度')
-        plt.title(f'Freq = {freq}, MSE = {mse:.6f}')
-        plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, 'freq_limit_fits.png'))
-    plt.close()
+    for epoch in recorded_epochs:
+        actual_epoch = epoch
+        
+        for freq in freqs_test:
+            # 创建频率文件夹
+            freq_dir = os.path.join(OUTPUT_DIR, f'freq_{freq}')
+            os.makedirs(freq_dir, exist_ok=True)
+            
+            # 收集所有种子的预测
+            seed_tests = []
+            seed_preds = []
+            seed_mses = []
+
+            for seed_idx in range(len(all_epoch_fits)):
+                fit_data = all_epoch_fits[seed_idx][epoch][freq]
+                mse_data = all_epoch_mses[seed_idx][epoch][freq]
+                seed_tests.append(fit_data[0])
+                seed_preds.append(fit_data[1])
+                seed_mses.append(mse_data)
+
+            # 计算平均
+            y_test_mean = np.mean(np.array(seed_tests), axis=0)
+            y_pred_mean = np.mean(np.array(seed_preds), axis=0)
+            mse_mean = np.mean(seed_mses)
+
+            # 绘制当前epoch的拟合图（1x2子图）
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+            
+            # 子图1: 拟合图
+            axes[0].plot(x_axis_pred, y_test_mean.flatten(), 'b-', label='真实信号', linewidth=2)
+            axes[0].plot(x_axis_pred, y_pred_mean.flatten(), 'r--', label='预测信号', linewidth=2)
+            axes[0].set_xlabel('X轴 (x_axis)', fontsize=11)
+            axes[0].set_ylabel('幅度 (Amplitude)', fontsize=11)
+            axes[0].set_title(f'拟合图', fontsize=12)
+            axes[0].legend(fontsize=10)
+            axes[0].grid(True, alpha=0.3)
+            
+            # 子图2: 误差图
+            error = y_test_mean.flatten() - y_pred_mean.flatten()
+            axes[1].plot(x_axis_pred, error, 'g-', linewidth=2)
+            axes[1].set_xlabel('X轴 (x_axis)', fontsize=11)
+            axes[1].set_ylabel('误差 (Error)', fontsize=11)
+            axes[1].set_title(f'误差图', fontsize=12)
+            axes[1].grid(True, alpha=0.3)
+            
+            # 总标题
+            fig.suptitle(f'Freq = {freq}, Epoch = {actual_epoch}, Avg MSE = {mse_mean:.6f}', 
+                         fontsize=13, fontweight='bold')
+            
+            plt.tight_layout()
+            save_path = os.path.join(freq_dir, f'epoch_{actual_epoch:03d}.png')
+            plt.savefig(save_path, dpi=150)
+            plt.close()
 
 
 # --- 主函数 ---
 def main():
-    # 1. 数据准备
-    print("生成训练和验证数据...")
-    train_dataset = generate_data(N_SAMPLES_TRAIN, FREQS_TRAIN, SEQ_LEN, PRED_LEN, X_AXIS_PRED)
-    val_dataset = generate_data(N_SAMPLES_VAL, FREQS_TRAIN, SEQ_LEN, PRED_LEN, X_AXIS_PRED)
-    
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
-    
-    # 2. 模型初始化
-    model = SimpleTransformerModel(input_dim=2, output_dim=1, seq_len=SEQ_LEN, pred_len=PRED_LEN)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=LR)
-    
-    # 3. 训练模型
-    print("开始训练模型...")
-    best_model_path = train_model(model, train_loader, val_loader, criterion, optimizer, EPOCHS)
-    
-    # 4. 评估模型
-    print("开始评估模型...")
-    # 加载最佳模型
-    model.load_state_dict(torch.load(best_model_path))
-    model.eval()
-    
-    results_mse = {}
-    y_tests_list = []
-    y_preds_list = []
-    mses_list = []
-    
-    for freq in FREQS_TEST:
-        # 为每个频率生成测试数据（使用固定相位0）
-        test_dataset = generate_data(1, [freq], SEQ_LEN, PRED_LEN, X_AXIS_PRED, fixed_phase=0)
-        test_loader = DataLoader(test_dataset, batch_size=1)
-        
-        with torch.no_grad():
-            for X_batch, Y_batch in test_loader:
-                X_batch, Y_batch = X_batch.to(DEVICE), Y_batch.to(DEVICE)
-                Y_pred = model(X_batch)
-                
-                # 计算MSE
-                mse = criterion(Y_pred, Y_batch).item()
-                results_mse[freq] = mse
-                
-                # 保存结果用于可视化
-                y_tests_list.append(Y_batch.cpu().numpy()[0])
-                y_preds_list.append(Y_pred.cpu().numpy()[0])
-                mses_list.append(mse)
-                
-                print(f'频率 {freq}, MSE: {mse:.6f}')
-    
-    # 5. 可视化结果
-    print("生成可视化图表...")
-    plot_freq_mse_summary(results_mse, FREQS_TRAIN)
-    plot_fits(FREQS_TEST, y_tests_list, y_preds_list, mses_list, X_AXIS_PRED)
-    
-    print("实验完成！所有结果已保存到:", OUTPUT_DIR)
+    all_train_losses = []
+    all_val_losses = []
+    all_epoch_mses = []
+    all_epoch_fits = []
 
-    plot_fits(FREQS_TEST, y_tests_list, y_preds_list, mses_list, X_AXIS_PRED)
-    
+    # 预生成所有测试数据
+    test_loaders = {}
+    for freq in FREQS_TEST:
+        test_dataset = generate_data(N_SAMPLES_TEST, [freq], SEQ_LEN, PRED_LEN, X_AXIS_PRED, fixed_phase=0)
+        test_loaders[freq] = DataLoader(test_dataset, batch_size=N_SAMPLES_TEST)
+
+    for seed in SEEDS:
+        print(f"\n=== 开始种子 {seed} 的实验 ===")
+
+        # 设置种子
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+        # 1. 数据准备
+        print("生成训练和验证数据...")
+        train_dataset = generate_data(N_SAMPLES_TRAIN, FREQS_TRAIN, SEQ_LEN, PRED_LEN, X_AXIS_PRED)
+        val_dataset = generate_data(N_SAMPLES_VAL, FREQS_TRAIN, SEQ_LEN, PRED_LEN, X_AXIS_PRED)
+
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
+
+        # 2. 模型初始化
+        model = SimpleTransformerModel(input_dim=2, output_dim=1, seq_len=SEQ_LEN, pred_len=PRED_LEN)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=LR)
+
+        # 3. 训练模型
+        print("开始训练模型...")
+        train_losses, val_losses, epoch_mses, epoch_fits, best_model_path = train_model_with_tracking(
+            model, train_loader, val_loader, test_loaders, criterion, optimizer, EPOCHS, seed
+        )
+
+        # 记录结果
+        all_train_losses.append(train_losses)
+        all_val_losses.append(val_losses)
+        all_epoch_mses.append(epoch_mses)
+        all_epoch_fits.append(epoch_fits)
+
+    # 4. 可视化结果
+    print("\n生成可视化图表...")
+    plot_training_loss(all_train_losses, all_val_losses)
+    plot_mse_vs_freq_over_epochs(all_epoch_mses, FREQS_TEST, FREQS_TRAIN)
+    plot_freq_fits_per_epoch(all_epoch_fits, all_epoch_mses, FREQS_TEST, X_AXIS_PRED)
+
     print("实验完成！所有结果已保存到:", OUTPUT_DIR)
 
 
