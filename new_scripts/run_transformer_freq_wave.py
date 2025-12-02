@@ -35,17 +35,18 @@ RANGE_TRAIN_END = 3500
 RANGE_TEST_START = 3500
 RANGE_TEST_END = 5000
 
-EPOCHS = 50
+EPOCHS = 20
 BATCH_SIZE = 32
-LR = 0.001
+LR = 0.01
 WEIGHT_DECAY = 1e-5
 SEEDS = [42]
 
 VIS_EPOCHS = [1, 5, 10, 20, 30, 40, 50]
 VIS_SAMPLE_INDICES = [0, 100, 200]
+TEST_NOISE_LEVEL = 0.05  # Noise level for input during testing 
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_DIR = f'./figures/Freq_Generalization_Exp_{TIMESTAMP}'
+OUTPUT_DIR = f'./figures/Freq_Generalization_Exp_Noise{TEST_NOISE_LEVEL}_{TIMESTAMP}'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 config = {
@@ -154,7 +155,7 @@ def train_epoch(model, train_loader, criterion, optimizer):
     return total_loss / len(train_loader.dataset)
 
 
-def evaluate_on_range_freq(model, wave, freq, range_start, range_end, criterion):
+def evaluate_on_range_freq(model, wave, freq, range_start, range_end, criterion, noise_level=0.05):
     model.eval()
     dataset = WaveSeq2SeqDataset(wave, range_start, range_end, SEQ_LEN, PRED_LEN)
     loader = DataLoader(dataset, batch_size=256)
@@ -166,13 +167,17 @@ def evaluate_on_range_freq(model, wave, freq, range_start, range_end, criterion)
     with torch.no_grad():
         for src, tgt in loader:
             src, tgt = src.to(DEVICE), tgt.to(DEVICE)
-            pred = model(src)
+
+            # Add noise to input for robustness testing
+            noise = torch.randn_like(src) * noise_level
+            src_noisy = src + noise
+            pred = model(src_noisy)
             batch_mse = torch.mean((pred - tgt) ** 2, dim=(1, 2))
             mse_list.extend(batch_mse.cpu().numpy())
             
             for i in range(src.size(0)):
                 if sample_count in VIS_SAMPLE_INDICES:
-                    pred_dict[sample_count] = (src[i].cpu(), pred[i].cpu(), tgt[i].cpu())
+                    pred_dict[sample_count] = (src_noisy[i].cpu(), pred[i].cpu(), tgt[i].cpu())
                 sample_count += 1
     
     return np.array(mse_list), pred_dict
@@ -233,7 +238,7 @@ def plot_epoch_samples(freq, range_name, epoch, mse_list, pred_dict):
         ax2.set_xticks([actual_start_idx + SEQ_LEN, actual_start_idx + SEQ_LEN + PRED_LEN])
     
     range_label = f'{range_name.upper()} Range ({RANGE_TRAIN_START}-{RANGE_TRAIN_END})' if range_name == 'train' else f'{range_name.upper()} Range ({RANGE_TEST_START}-{RANGE_TEST_END})'
-    fig.suptitle(f'Freq={freq:.1f}Hz, Epoch={epoch}, {range_label}', fontsize=13, fontweight='bold')
+    fig.suptitle(f'Freq={freq:.1f}Hz, Epoch={epoch}, {range_label}(Input Noise={TEST_NOISE_LEVEL})', fontsize=13, fontweight='bold')
     
     plt.tight_layout()
     save_path = os.path.join(freq_dir, f'epoch_{epoch:03d}_samples.png')
@@ -338,7 +343,7 @@ def main():
         
         model = TransformerSeq2SeqModel(d_model=32, nhead=4, num_layers=2)
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+        optimizer = optim.Adam(model.parameters(), lr=LR)
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
         
         print("Training...\n")
@@ -358,7 +363,7 @@ def main():
                     print(f"    Evaluating {range_name.upper()} Range:")
                     
                     for freq in FREQS_TEST:
-                        mse_list, pred_dict = evaluate_on_range_freq(model, waves[freq], freq, range_start, range_end, criterion)
+                        mse_list, pred_dict = evaluate_on_range_freq(model, waves[freq], freq, range_start, range_end, criterion, noise_level=TEST_NOISE_LEVEL)
                         
                         epoch_mses[range_name][freq].append({'epoch': epoch, 'mse_list': mse_list, 'pred_dict': pred_dict})
                         
