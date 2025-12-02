@@ -5,6 +5,7 @@ import torch.nn as nn
 import os
 import sys
 import pickle
+import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils import rescale, get_fq_coef
@@ -19,7 +20,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
-OUTPUT_DIR = "figures/beta_base"
+date_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+OUTPUT_DIR = f"figures/beta_base_{date_time}"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 创建模型保存目录
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -90,26 +92,93 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         ax[2][1].set_title(f"Spectrum Error, AVG RMS: {avg_spectrum_error:.6f}, STD RMS: {std_spectrum_error:.6f}")
         ax[2][1].semilogy(np.abs(avg_pred_coef - true_coef), 'b-o', label=f"Avg Fit Coef Error")
 
+        # 收集所有seed的数据
+        all_y_pred = []
+        all_train_errors = []
+        all_y_pred_test = []
+        all_test_errors = []
+        all_pred_coef = []
+        all_coef_errors = []
+        
         for seed in seeds:
             y_pred = results[seed][epoch]["y_pred"]
             pred_coef = results[seed][epoch]["pred_coef"]
             y_pred_test = results[seed][epoch]["y_pred_test"]
-
-            ax[0][0].plot(x_train, y_pred, ':', label=f"Fit sin(x), seed={seed}",alpha=0.7)
-            ax[0][0].legend()
-            ax[0][1].plot(x_train, y_pred - y_train, ':', label=f"Avg train Loss, seed={seed}",alpha=0.7)
-            ax[0][1].legend()
-            # 可视化测试结果
-            ax[1][0].plot(x_test, y_pred_test, ':', label=f"Fit sin(x), seed={seed}",alpha=0.7)   
-            ax[1][0].legend()
-            ax[1][1].plot(x_test, y_pred_test - y_test, ':', label=f"Test Loss, seed={seed}",alpha=0.7)
-            ax[1][1].legend()
-            # 可视化频谱
-            ax[2][0].semilogy(np.abs(pred_coef), ':', label=f"Fit Coef, seed={seed}",alpha=0.7)
-            ax[2][0].legend()
-            # 可视化频谱的误差tuple
-            ax[2][1].semilogy(np.abs(pred_coef - true_coef), ':', label=f"Fit Coef Error, seed={seed}",alpha=0.7)
-            ax[2][1].legend()
+            
+            all_y_pred.append(y_pred)
+            all_train_errors.append(y_pred - y_train)
+            all_y_pred_test.append(y_pred_test)
+            all_test_errors.append(y_pred_test - y_test)
+            all_pred_coef.append(np.abs(pred_coef))
+            all_coef_errors.append(np.abs(pred_coef - true_coef))
+        
+        # 计算每个点的平均值和标准差
+        mean_y_pred = np.mean(all_y_pred, axis=0)
+        std_y_pred = np.std(all_y_pred, axis=0)
+        
+        mean_train_errors = np.mean(all_train_errors, axis=0)
+        std_train_errors = np.std(all_train_errors, axis=0)
+        
+        mean_y_pred_test = np.mean(all_y_pred_test, axis=0)
+        std_y_pred_test = np.std(all_y_pred_test, axis=0)
+        
+        mean_test_errors = np.mean(all_test_errors, axis=0)
+        std_test_errors = np.std(all_test_errors, axis=0)
+        
+        mean_pred_coef = np.mean(all_pred_coef, axis=0)
+        std_pred_coef = np.std(all_pred_coef, axis=0)
+        
+        mean_coef_errors = np.mean(all_coef_errors, axis=0)
+        std_coef_errors = np.std(all_coef_errors, axis=0)
+        
+        # 使用fill_between绘制数据区间
+        # 训练拟合结果
+        ax[0][0].plot(x_train, mean_y_pred, '-', color='blue', label=f"Mean Fit sin(x)")
+        ax[0][0].fill_between(x_train, 
+                            mean_y_pred - std_y_pred, 
+                            mean_y_pred + std_y_pred, 
+                            color='blue', alpha=0.2)
+        ax[0][0].legend()
+        
+        # 训练误差
+        ax[0][1].plot(x_train, mean_train_errors, '-', color='green', label=f"Mean train Loss")
+        ax[0][1].fill_between(x_train, 
+                            mean_train_errors - std_train_errors, 
+                            mean_train_errors + std_train_errors, 
+                            color='green', alpha=0.2)
+        ax[0][1].legend()
+        
+        # 测试拟合结果
+        ax[1][0].plot(x_test, mean_y_pred_test, '-', color='red', label=f"Mean Fit sin(x)")
+        ax[1][0].fill_between(x_test, 
+                            mean_y_pred_test - std_y_pred_test, 
+                            mean_y_pred_test + std_y_pred_test, 
+                            color='red', alpha=0.2)
+        ax[1][0].legend()
+        
+        # 测试误差
+        ax[1][1].plot(x_test, mean_test_errors, '-', color='purple', label=f"Mean Test Loss")
+        ax[1][1].fill_between(x_test, 
+                            mean_test_errors - std_test_errors, 
+                            mean_test_errors + std_test_errors, 
+                            color='purple', alpha=0.2)
+        ax[1][1].legend()
+        
+        # 频谱系数
+        ax[2][0].semilogy(mean_pred_coef, '-', color='orange', label=f"Mean Fit Coef")
+        ax[2][0].fill_between(range(len(mean_pred_coef)), 
+                            mean_pred_coef - std_pred_coef, 
+                            mean_pred_coef + std_pred_coef, 
+                            color='orange', alpha=0.2)
+        ax[2][0].legend()
+        
+        # 频谱误差
+        ax[2][1].semilogy(mean_coef_errors, '-', color='brown', label=f"Mean Fit Coef Error")
+        ax[2][1].fill_between(range(len(mean_coef_errors)), 
+                            mean_coef_errors - std_coef_errors, 
+                            mean_coef_errors + std_coef_errors, 
+                            color='brown', alpha=0.2)
+        ax[2][1].legend()
 
 
         fig.savefig(f"{output_dir}/beta_{beta}_epoch_{epoch}.png")
@@ -242,37 +311,47 @@ def main():
 
     # 利用rms_list绘制beta与rms的关系图
     fig_seed, ax_seed = plt.subplots(3, 1, figsize=(12, 18), sharex=True) # 共享x轴
-    # 计算每个beta值下每个epoch的平均rms值
+    # 计算每个beta值下每个epoch的平均rms值和标准差
     avg_rms_data = {}
-    # 计算每个epoch下的train_rms、test_rms、spectrum_error
-    epoch_rms_data = {}
+    std_rms_data = {}
     for beta in BETA:
         avg_rms_data[beta] = {}
-        epoch_rms_data[beta] = {}
+        std_rms_data[beta] = {}
         for epoch in rms_data[beta][SEEDS[0]]:
             avg_rms_data[beta][epoch] = {}
+            std_rms_data[beta][epoch] = {}
+            # 计算平均值
             avg_rms_data[beta][epoch]["train_rms"] = np.mean([rms_data[beta][seed][epoch]["train_rms"] for seed in SEEDS])
             avg_rms_data[beta][epoch]["test_rms"] = np.mean([rms_data[beta][seed][epoch]["test_rms"] for seed in SEEDS])
             avg_rms_data[beta][epoch]["spectrum_error"] = np.mean([rms_data[beta][seed][epoch]["spectrum_error"] for seed in SEEDS])
-        for seed in SEEDS:
-            epoch_rms_data[beta][seed] = {}
-            epoch_rms_data[beta][seed]["train_rms"] = np.array([rms_data[beta][seed][epoch]["train_rms"] for epoch in avg_rms_data[beta]])
-            epoch_rms_data[beta][seed]["test_rms"] = np.array([rms_data[beta][seed][epoch]["test_rms"] for epoch in avg_rms_data[beta]])
-            epoch_rms_data[beta][seed]["spectrum_error"] = np.array([rms_data[beta][seed][epoch]["spectrum_error"] for epoch in avg_rms_data[beta]])
+            # 计算标准差
+            std_rms_data[beta][epoch]["train_rms"] = np.std([rms_data[beta][seed][epoch]["train_rms"] for seed in SEEDS])
+            std_rms_data[beta][epoch]["test_rms"] = np.std([rms_data[beta][seed][epoch]["test_rms"] for seed in SEEDS])
+            std_rms_data[beta][epoch]["spectrum_error"] = np.std([rms_data[beta][seed][epoch]["spectrum_error"] for seed in SEEDS])
 
     for beta in BETA:
         epochs_recorded = sorted(avg_rms_data[beta].keys())
-        rms_value = np.array(list(avg_rms_data[beta][epoch]['train_rms']for epoch in epochs_recorded))
-        test_rms_value = np.array(list(avg_rms_data[beta][epoch]['test_rms']for epoch in epochs_recorded))
-        spectrum_error_value = np.array(list(avg_rms_data[beta][epoch]['spectrum_error']for epoch in epochs_recorded))
+        # 获取平均值
+        rms_value = np.array([avg_rms_data[beta][epoch]['train_rms'] for epoch in epochs_recorded])
+        test_rms_value = np.array([avg_rms_data[beta][epoch]['test_rms'] for epoch in epochs_recorded])
+        spectrum_error_value = np.array([avg_rms_data[beta][epoch]['spectrum_error'] for epoch in epochs_recorded])
+        # 获取标准差
+        rms_std = np.array([std_rms_data[beta][epoch]['train_rms'] for epoch in epochs_recorded])
+        test_rms_std = np.array([std_rms_data[beta][epoch]['test_rms'] for epoch in epochs_recorded])
+        spectrum_error_std = np.array([std_rms_data[beta][epoch]['spectrum_error'] for epoch in epochs_recorded])
 
+        # 绘制平均线
         ax_seed[0].semilogy(epochs_recorded, rms_value,"-o", label=f"Beta={beta}", color=color_map[beta])
         ax_seed[1].semilogy(epochs_recorded, test_rms_value,"-o", label=f"Beta={beta}", color=color_map[beta])
         ax_seed[2].semilogy(epochs_recorded, spectrum_error_value,"-o", label=f"Beta={beta}", color=color_map[beta])
-        # for seed in SEEDS:
-        #     ax_seed[0].semilogy(epochs_recorded, epoch_rms_data[beta][seed]["train_rms"], ':', color=color_map[beta], alpha=0.7)
-        #     ax_seed[1].semilogy(epochs_recorded, epoch_rms_data[beta][seed]["test_rms"], ':', color=color_map[beta], alpha=0.7)
-        #     ax_seed[2].semilogy(epochs_recorded, epoch_rms_data[beta][seed]["spectrum_error"], ':', color=color_map[beta], alpha=0.7)
+        
+        # 使用fill_between绘制误差区间
+        ax_seed[0].fill_between(epochs_recorded, rms_value - rms_std, rms_value + rms_std, 
+                               color=color_map[beta], alpha=0.2)
+        ax_seed[1].fill_between(epochs_recorded, test_rms_value - test_rms_std, test_rms_value + test_rms_std, 
+                               color=color_map[beta], alpha=0.2)
+        ax_seed[2].fill_between(epochs_recorded, spectrum_error_value - spectrum_error_std, spectrum_error_value + spectrum_error_std, 
+                               color=color_map[beta], alpha=0.2)
 
     ax_seed[0].set_title(f"Train RMS vs Epoch")
     ax_seed[0].set_xlabel("Epoch")
@@ -306,6 +385,83 @@ def main():
     with open(baseline_file, 'wb') as f:
         pickle.dump(results_base, f)
     print(f"Saved baseline results to {baseline_file}")
+    
+    # 计算每个 beta 值在最后一个 epoch 的平均性能指标
+    beta_values = []
+    avg_test_rms = []
+    std_test_rms = []
+    avg_spectrum_error = []
+    std_spectrum_error = []
+    
+    # 遍历每个 beta 值
+    for beta in BETA:
+        beta_values.append(beta)
+        # 提取所有种子在最后一个 epoch 的 test_rms 和 spectrum_error
+        final_test_rms_list = [rms_data[beta][seed][EPOCHS]['test_rms'] for seed in SEEDS]
+        final_spectrum_error_list = [rms_data[beta][seed][EPOCHS]['spectrum_error'] for seed in SEEDS]
+        
+        # 计算平均值和标准差
+        avg_test_rms.append(np.mean(final_test_rms_list))
+        std_test_rms.append(np.std(final_test_rms_list))
+        avg_spectrum_error.append(np.mean(final_spectrum_error_list))
+        std_spectrum_error.append(np.std(final_spectrum_error_list))
+    
+    # 创建图形，绘制带填充区间的折线图
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+    
+    # 子图1：Final Test RMS vs Beta
+    ax1.plot(beta_values, avg_test_rms, 'o-', color='blue', label='Final Test RMS')
+    ax1.fill_between(beta_values, 
+                    avg_test_rms - np.array(std_test_rms), 
+                    avg_test_rms + np.array(std_test_rms), 
+                    color='blue', alpha=0.2)
+    ax1.set_xlabel('Beta')
+    ax1.set_ylabel('Final Test RMS')
+    ax1.set_xticks(beta_values)
+    ax1.set_yscale('log')
+    ax1.set_title('Final Test RMS vs Beta')
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    
+    # 标记最低点对应的 Beta
+    min_test_rms_idx = np.argmin(avg_test_rms)
+    ax1.annotate(f'Best Beta: {beta_values[min_test_rms_idx]}', 
+                xy=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx]),
+                xytext=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx] * 1.5),
+                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
+                fontsize=12, color='red')
+    
+    # 子图2：Final Spectrum Error vs Beta
+    ax2.plot(beta_values, avg_spectrum_error, 'o-', color='green', label='Final Spectrum Error')
+    ax2.fill_between(beta_values, 
+                    avg_spectrum_error - np.array(std_spectrum_error), 
+                    avg_spectrum_error + np.array(std_spectrum_error), 
+                    color='green', alpha=0.2)
+    ax2.set_xlabel('Beta')
+    ax2.set_ylabel('Final Spectrum Error')
+    ax2.set_xticks(beta_values)
+    ax2.set_yscale('log')
+    ax2.set_title('Final Spectrum Error vs Beta')
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    
+    # 标记最低点对应的 Beta
+    min_spectrum_error_idx = np.argmin(avg_spectrum_error)
+    ax2.annotate(f'Best Beta: {beta_values[min_spectrum_error_idx]}', 
+                xy=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx]),
+                xytext=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx] * 1.5),
+                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
+                fontsize=12, color='red')
+    
+    # 设置 Beta 轴为对数坐标
+    ax1.set_xscale('log')
+    ax2.set_xscale('log')
+    
+    plt.tight_layout()
+    
+    # 保存图形
+    output_path = os.path.join(OUTPUT_DIR, 'final_performance_vs_beta.png')
+    plt.savefig(output_path)
+    print(f"Saved final performance plot to {output_path}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
