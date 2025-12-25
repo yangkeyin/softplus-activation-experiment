@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,6 +17,10 @@ np.random.seed(42)
 # 定义要测试的多个 beta 值
 BETA_VALUES = [0.5, 1.0, 2.0, 4.0]
 MAX_EPOCHS = 10000  # 固定训练轮次
+BINS = 5          # 频谱斜率拟合时的箱子数量
+OUTPUTDIR = f"./figures/Compare_Beta_Slopes_bin_{BINS}/" # 保存结果的目录
+if not os.path.exists(OUTPUTDIR):
+    os.makedirs(OUTPUTDIR)
 
 # ==========================================
 # 1. Data Generation
@@ -95,7 +100,7 @@ def calculate_decay_base(model, B_singularity, beta):
     
     # Calculate singularity distances for each hidden neuron 
     # Formula: (pi/beta - b_i)/w_i 
-    distances = np.abs((np.pi / beta - b) / w) 
+    distances = np.abs((np.pi / beta) / w) 
     
     # Find the minimum distance 
     if len(distances) == 0: 
@@ -109,35 +114,44 @@ def calculate_decay_base(model, B_singularity, beta):
     return Theta_min, min_distance
 
 
-def calculate_actual_slope(coeffs, degrees, threshold=1e-5):
+def calculate_envelope_slope(coeffs, degrees, n_bins=BINS, threshold=1e-5):
     """
-    通过线性回归计算频谱系数的实际衰减斜率
-    
-    Args:
-        coeffs: 频谱系数数组
-        degrees: 对应的多项式次数数组
-        threshold: 忽略低于此阈值的系数
-        
-    Returns:
-        actual_slope: 实际衰减斜率
-        r_squared: 拟合优度
+    只针对频谱的“包络线”（局部极大值）进行线性回归，
+    获取最精确的收敛率上界。
     """
-    # 筛选出有效的系数（大于阈值）
-    valid_indices = np.where(coeffs > threshold)[0]
-    if len(valid_indices) < 2:
-        return 0.0, 0.0
+    # 预处理，去掉极小值
+    valid_mask = (coeffs > threshold)
+    valid_coeffs = np.log(coeffs[valid_mask])
+    valid_degrees = degrees[valid_mask]
+
+    # 对degrees分段
+    bins = np.linspace(valid_degrees.min(), valid_degrees.max(), n_bins + 1)
+    which_bin = np.digitize(valid_degrees, bins)
+    peak_x = []
+    peak_y = []
+
+    # 遍历每一个箱子
+    for i in range(1, n_bins + 1):
+        mask = (which_bin == i)
+        if np.any(mask):
+            # find the coedffs in the bin
+            existing_peaks = valid_coeffs[mask]
+
+            # find the peak in the bin
+            peak_idx = np.argmax(existing_peaks)
+            peak_x.append(valid_degrees[mask][peak_idx])
+            peak_y.append(existing_peaks[peak_idx])
+            
     
-    valid_degrees = degrees[valid_indices]
-    valid_log_coeffs = np.log(coeffs[valid_indices])
-    
-    # 线性回归拟合
-    regressor = LinearRegression()
-    regressor.fit(valid_degrees.reshape(-1, 1), valid_log_coeffs)
-    
-    actual_slope = -regressor.coef_[0]  # 斜率的负值即为衰减率
-    r_squared = regressor.score(valid_degrees.reshape(-1, 1), valid_log_coeffs)
-    
-    return actual_slope, r_squared
+    # 对局部最大值进行线性拟合
+    peak_x = np.array(peak_x).reshape(-1, 1)
+    peak_y = np.array(peak_y)
+    reg = LinearRegression()
+    reg.fit(peak_x, peak_y)
+    envelope_slope = -reg.coef_[0]
+    r2 = reg.score(peak_x, peak_y)
+
+    return envelope_slope, r2, peak_x, peak_y
 
 # ==========================================
 # 4. Main Experiment Loop
@@ -186,7 +200,7 @@ for beta in BETA_VALUES:
     decay_base, min_singularity_x = calculate_decay_base(model, np.pi / beta, beta)
     
     # 计算实际斜率
-    actual_slope, r_squared = calculate_actual_slope(pred_coeffs, degrees)
+    actual_slope, r_squared, peak_x, peak_y = calculate_envelope_slope(pred_coeffs, degrees)
     
     # 存储结果
     beta_results[beta] = {
@@ -194,7 +208,9 @@ for beta in BETA_VALUES:
         'decay_base': decay_base,
         'min_singularity_x': min_singularity_x,
         'actual_slope': actual_slope,
-        'r_squared': r_squared
+        'r_squared': r_squared,
+        'peak_x': peak_x,
+        'peak_y': peak_y
     }
 
 # ==========================================
@@ -216,6 +232,7 @@ for i, beta in enumerate(BETA_VALUES):
     pred_coeffs = result['pred_coeffs']
     decay_base = result['decay_base']
     actual_slope = result['actual_slope']
+
     
     color = colors[i]
     
@@ -223,24 +240,31 @@ for i, beta in enumerate(BETA_VALUES):
     plt.plot(degrees, pred_coeffs, 
              color=color, linewidth=2, alpha=0.8, 
              label=f'Actual Spectrum (beta={beta}, slope={actual_slope:.4f})')
+    real_decay = A_intercept * np.exp(-actual_slope * degrees)
+    plt.plot(degrees, real_decay, 
+            color=color, linewidth=2, alpha=0.5, linestyle=':', 
+            label=f'Actual Slope Line (beta={beta})')
               
     # 绘制理想斜率
     theoretical_decay = A_intercept * (decay_base ** (-degrees))
+    ideal_k = np.log(decay_base)
     plt.plot(degrees, theoretical_decay, 
              color=color, linewidth=1.5, alpha=0.8, linestyle='--', 
-             label=f'Ideal Slope (beta={beta}, S={decay_base:.4f})')
+             label=f'Ideal Slope (beta={beta}, S={ideal_k:.4f})')
+    plt.scatter(result['peak_x'], np.exp(result['peak_y']), 
+                color=color, s=30, marker='x', alpha=0.6)
 
 # 设置图表样式
 plt.yscale('log')
 plt.xlim(0, max_analyze_degree)
-plt.ylim(1e-7, np.max(target_coeffs)*1.5)
+plt.ylim(1e-5, np.max(target_coeffs)*1.5)
 plt.title("Spectral Bias and Slope Comparison Across Multiple Beta Values")
 plt.xlabel("Legendre Polynomial Degree ($n$)")
 plt.ylabel("Coefficient Amplitude $|c_n|$ (Log Scale)")
 plt.grid(True, which='both', linestyle='--', alpha=0.4)
-plt.legend(fontsize=10, loc='lower left', ncol=2)
+plt.legend(fontsize=10, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False)
 plt.tight_layout()
-plt.savefig('beta_slope_comparison.png', dpi=300)
+plt.savefig(os.path.join(OUTPUTDIR, 'beta_slope_comparison.png'), dpi=300)
 plt.show()
 
 # 2. 斜率对比柱状图
@@ -267,7 +291,7 @@ plt.xticks(x, betas)
 plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
 plt.tight_layout()
-plt.savefig('beta_slope_bar.png', dpi=300)
+plt.savefig(os.path.join(OUTPUTDIR, 'beta_slope_bar.png'), dpi=300)
 plt.show()
 
 # 3. 奇点距离与斜率关系图
@@ -296,7 +320,7 @@ plt.title('Relationship Between Singularity Distance and Slope')
 plt.legend()
 plt.grid(True, linestyle='--', alpha=0.6)
 plt.tight_layout()
-plt.savefig('singularity_slope_relation.png', dpi=300)
+plt.savefig(os.path.join(OUTPUTDIR, 'singularity_slope_relation.png'), dpi=300)
 plt.show()
 
 # ==========================================
@@ -312,4 +336,16 @@ for beta in BETA_VALUES:
     theoretical_slope = np.log(result['decay_base'])
     print(f"{beta:6.1f} | {theoretical_slope:9.4f} | {result['actual_slope']:8.4f} | {result['r_squared']:13.4f} | {result['min_singularity_x']:14.6f}")
 
+output_summary = os.path.join(OUTPUTDIR, "experiment_summary.txt")
+with open(output_summary, "w", encoding="utf-8") as f:
+    f.write("="*60 + "\n")
+    f.write("实验结果总结\n")
+    f.write("="*60 + "\n")
+    f.write("Beta 值 | 理论斜率 | 实际斜率 | R² 拟合优度 | 最小奇点距离\n")
+    f.write("-"*60 + "\n")
+    for beta in BETA_VALUES:
+        result = beta_results[beta]
+        theoretical_slope = np.log(result['decay_base'])
+        f.write(f"{beta:6.1f} | {theoretical_slope:9.4f} | {result['actual_slope']:8.4f} | {result['r_squared']:13.4f} | {result['min_singularity_x']:14.6f}\n")
+    f.write("\n训练完成！所有结果已保存为 PNG 文件。\n")
 print("\n训练完成！所有结果已保存为 PNG 文件。")
