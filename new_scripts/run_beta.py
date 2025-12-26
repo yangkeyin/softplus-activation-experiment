@@ -6,6 +6,7 @@ import os
 import sys
 import pickle
 import datetime
+from scipy.interpolate import interp1d
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils import rescale, get_fq_coef
@@ -47,6 +48,142 @@ def set_seed(seed_value):
     # Python的内置随机库
     import random
     random.seed(seed_value)
+
+def calculate_theoretical_slope(beta):
+    """
+    计算 Softplus(beta) 的理论频谱衰减斜率。
+    Based on Eq. (19) in the paper:
+    Singularity distance B = pi / beta
+    Bernstein Ellipse parameter Theta = B + sqrt(1 + B^2)
+    Theoretical Slope = -ln(Theta)
+    """
+    B = np.pi / beta
+    Theta = B + np.sqrt(1 + B**2)
+    # 衰减率为 Theta^{-k} = exp(-k * ln(Theta))
+    # log|ck| vs k 的斜率应为 -ln(Theta)
+    return -np.log(Theta)
+
+def plot_slope_verification(slope_data, output_dir):
+    """
+    绘制斜率分析验证图 (Quantitative Verification)
+    """
+    fig, ax = plt.subplots(1, 2, figsize=(18, 7))
+    
+    betas = [d['beta'] for d in slope_data]
+    colors = plt.cm.viridis(np.linspace(0, 1, len(betas)))
+    
+    # --- Subplot 1: Spectral Decay Profiles (直观对比) ---
+    ax[0].set_title("Spectral Decay: Theory vs Experiment")
+    ax[0].set_xlabel("Frequency Index k")
+    ax[0].set_ylabel("Log Magnitude ln(|ck|)")
+    
+    for i, data in enumerate(slope_data):
+        beta = data['beta']
+        log_coef = data['log_coef']
+        theo_slope = data['theo_slope']
+        
+        # 绘制实验数据 (实线)
+        k_indices = np.arange(len(log_coef))
+        ax[0].plot(k_indices, log_coef, '-', color=colors[i], label=f'Exp Beta={beta}', alpha=0.6)
+        
+        # 绘制理论斜率 (虚线)
+        # 为了方便对比，将理论线平移到与实验数据的起点对齐 (Intercept alignment)
+        # y = slope * k + intercept
+        # 使用实验数据的平均截距来定位理论线
+        intercept = np.mean(log_coef[:5]) # 锚定在前几个低频系数
+        theo_line = theo_slope * k_indices + intercept
+        ax[0].plot(k_indices, theo_line, '--', color=colors[i], linewidth=2, label=f'Theo Beta={beta}')
+
+    ax[0].legend()
+    ax[0].grid(True, which='both', linestyle='--', alpha=0.5)
+
+    # --- Subplot 2: Slope Comparison (定量对比) ---
+    ax[1].set_title("Quantitative Verification: Decay Slope")
+    ax[1].set_xlabel("Beta (Activation Smoothness)")
+    ax[1].set_ylabel("Decay Slope magnitude |m|")
+    
+    exp_slopes = [-d['exp_slope'] for d in slope_data] # 取绝对值方便展示
+    theo_slopes = [-d['theo_slope'] for d in slope_data]
+    
+    # 绘制对比图
+    ax[1].plot(betas, theo_slopes, 'b-o', markersize=10, label="Theoretical Slope |-ln(Theta)|")
+    ax[1].plot(betas, exp_slopes, 'r--*', markersize=12, label="Experimental Slope")
+    
+    # 在点旁边标注数值
+    for x, y_t, y_e in zip(betas, theo_slopes, exp_slopes):
+        ax[1].text(x, y_t, f"{y_t:.2f}", ha='right', va='bottom', color='blue')
+        ax[1].text(x, y_e, f"{y_e:.2f}", ha='left', va='top', color='red')
+
+    ax[1].set_xticks(betas)
+    ax[1].minorticks_off()
+    ax[1].legend()
+    ax[1].grid(True, linestyle='--', alpha=0.5)
+
+    save_path = f"{output_dir}/beta_spectral_slope_analysis.png"
+    fig.savefig(save_path)
+    plt.close(fig)
+    print(f"Slope verification plot saved to {save_path}")
+
+def plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, output_dir):
+    """
+    绘制最终性能指标与beta的关系图
+    """
+    # 创建图形，绘制带填充区间的折线图
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+    
+    # 子图1：Final Test RMS vs Beta
+    ax1.plot(beta_values, avg_test_rms, 'o-', color='blue', label='Final Test RMS')
+    ax1.fill_between(beta_values, 
+                    [avg - std for avg, std in zip(avg_test_rms, std_test_rms)], 
+                    [avg + std for avg, std in zip(avg_test_rms, std_test_rms)], 
+                    color='blue', alpha=0.2)
+    ax1.set_xlabel('Beta')
+    ax1.set_ylabel('Final Test RMS')
+    ax1.set_xticks(beta_values)
+    ax1.set_xticklabels([f"{b:.2f}" for b in beta_values])
+    ax1.set_yscale('log')
+    ax1.set_title('Final Test RMS vs Beta')
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    
+    # 标记最低点对应的 Beta
+    min_test_rms_idx = np.argmin(avg_test_rms)
+    ax1.annotate(f'Best Beta: {beta_values[min_test_rms_idx]}', 
+                xy=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx]),
+                xytext=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx] * 1.5),
+                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
+                fontsize=12, color='red')
+    
+    # 子图2：Final Spectrum Error vs Beta
+    ax2.plot(beta_values, avg_spectrum_error, 'o-', color='green', label='Final Spectrum Error')
+    ax2.fill_between(beta_values, 
+                    [avg - std for avg, std in zip(avg_spectrum_error, std_spectrum_error)], 
+                    [avg + std for avg, std in zip(avg_spectrum_error, std_spectrum_error)], 
+                    color='green', alpha=0.2)
+    ax2.set_xlabel('Beta')
+    ax2.set_ylabel('Final Spectrum Error')
+    ax2.set_xticks(beta_values)
+    ax2.minorticks_off()
+    ax2.set_xticklabels([f"{b:.2f}" for b in beta_values])
+    ax2.set_yscale('log')
+    ax2.set_title('Final Spectrum Error vs Beta')
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    
+    # 标记最低点对应的 Beta
+    min_spectrum_error_idx = np.argmin(avg_spectrum_error)
+    ax2.annotate(f'Best Beta: {beta_values[min_spectrum_error_idx]}', 
+                xy=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx]),
+                xytext=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx] * 1.5),
+                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
+                fontsize=12, color='red')
+    
+    
+    plt.tight_layout()
+    
+    # 保存图形
+    output_path = os.path.join(output_dir, 'final_performance_vs_beta.png')
+    plt.savefig(output_path)
+    print(f"Saved final performance plot to {output_path}")
+    plt.close(fig)
 
 
 def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, output_dir):
@@ -133,7 +270,6 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         
         # 使用fill_between绘制数据区间
         # 训练拟合结果
-        ax[0][0].plot(x_train, mean_y_pred, '-', color='blue', label=f"Mean Fit sin(x)")
         ax[0][0].fill_between(x_train, 
                             mean_y_pred - std_y_pred, 
                             mean_y_pred + std_y_pred, 
@@ -141,7 +277,6 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         ax[0][0].legend()
         
         # 训练误差
-        ax[0][1].plot(x_train, mean_train_errors, '-', color='green', label=f"Mean train Loss")
         ax[0][1].fill_between(x_train, 
                             mean_train_errors - std_train_errors, 
                             mean_train_errors + std_train_errors, 
@@ -149,7 +284,6 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         ax[0][1].legend()
         
         # 测试拟合结果
-        ax[1][0].plot(x_test, mean_y_pred_test, '-', color='red', label=f"Mean Fit sin(x)")
         ax[1][0].fill_between(x_test, 
                             mean_y_pred_test - std_y_pred_test, 
                             mean_y_pred_test + std_y_pred_test, 
@@ -157,7 +291,6 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         ax[1][0].legend()
         
         # 测试误差
-        ax[1][1].plot(x_test, mean_test_errors, '-', color='purple', label=f"Mean Test Loss")
         ax[1][1].fill_between(x_test, 
                             mean_test_errors - std_test_errors, 
                             mean_test_errors + std_test_errors, 
@@ -165,7 +298,6 @@ def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, 
         ax[1][1].legend()
         
         # 频谱系数
-        ax[2][0].semilogy(mean_pred_coef, '-', color='orange', label=f"Mean Fit Coef")
         ax[2][0].fill_between(range(len(mean_pred_coef)), 
                             mean_pred_coef - std_pred_coef, 
                             mean_pred_coef + std_pred_coef, 
@@ -393,6 +525,9 @@ def main():
     avg_spectrum_error = []
     std_spectrum_error = []
     
+    # 存储频谱系数用于斜率分析
+    spectrum_data = []
+    
     # 遍历每个 beta 值
     for beta in BETA:
         beta_values.append(beta)
@@ -400,68 +535,62 @@ def main():
         final_test_rms_list = [rms_data[beta][seed][EPOCHS]['test_rms'] for seed in SEEDS]
         final_spectrum_error_list = [rms_data[beta][seed][EPOCHS]['spectrum_error'] for seed in SEEDS]
         
+        # 提取频谱系数数据
+        final_pred_coef_list = [rms_data[beta][seed][EPOCHS].get('pred_coef', baseline_metrics[beta][seed][EPOCHS]['pred_coef_base']) for seed in SEEDS]
+        
+        # 存储频谱数据
+        for seed, pred_coef in zip(SEEDS, final_pred_coef_list):
+            spectrum_data.append({
+                'beta': beta,
+                'true_coef': true_coef,
+                'pred_coef': pred_coef,
+                'spectrum_error': rms_data[beta][seed][EPOCHS]['spectrum_error']
+            })
+        
         # 计算平均值和标准差
         avg_test_rms.append(np.mean(final_test_rms_list))
         std_test_rms.append(np.std(final_test_rms_list))
         avg_spectrum_error.append(np.mean(final_spectrum_error_list))
         std_spectrum_error.append(np.std(final_spectrum_error_list))
     
-    # 创建图形，绘制带填充区间的折线图
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+    # 调用函数绘制final performance vs beta图（修复了x轴显示问题）
+    plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, OUTPUT_DIR)
     
-    # 子图1：Final Test RMS vs Beta
-    ax1.plot(beta_values, avg_test_rms, 'o-', color='blue', label='Final Test RMS')
-    ax1.fill_between(beta_values, 
-                    avg_test_rms - np.array(std_test_rms), 
-                    avg_test_rms + np.array(std_test_rms), 
-                    color='blue', alpha=0.2)
-    ax1.set_xlabel('Beta')
-    ax1.set_ylabel('Final Test RMS')
-    ax1.set_xticks(beta_values)
-    ax1.set_yscale('log')
-    ax1.set_title('Final Test RMS vs Beta')
-    ax1.grid(True, linestyle='--', alpha=0.7)
+    # 收集斜率分析数据
+    slope_data = []
+    for beta_idx, beta in enumerate(beta_values):
+        # 获取该beta值的所有种子的预测系数
+        all_pred_coef = [seed_data['pred_coef'] for seed_data in spectrum_data if seed_data['beta'] == beta]
+        
+        # 计算平均预测系数
+        avg_pred_coef = np.mean(all_pred_coef, axis=0)
+        
+        # 计算对数幅度
+        log_coef = np.log(np.abs(avg_pred_coef))
+        
+        # 计算理论斜率
+        theo_slope = calculate_theoretical_slope(beta)
+        
+        # 计算实验斜率（使用线性回归拟合）
+        # 选择合适的k范围，比如从第5个到第25个系数（避开低频和高频噪声）
+        k_start, k_end = 5, 25
+        k_indices = np.arange(k_start, k_end).reshape(-1, 1)
+        log_coef_subset = log_coef[k_start:k_end]
+        
+        # 使用线性回归
+        from sklearn.linear_model import LinearRegression
+        reg = LinearRegression().fit(k_indices, log_coef_subset)
+        exp_slope = reg.coef_[0]
+        
+        slope_data.append({
+            'beta': beta,
+            'log_coef': log_coef,
+            'theo_slope': theo_slope,
+            'exp_slope': exp_slope
+        })
     
-    # 标记最低点对应的 Beta
-    min_test_rms_idx = np.argmin(avg_test_rms)
-    ax1.annotate(f'Best Beta: {beta_values[min_test_rms_idx]}', 
-                xy=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx]),
-                xytext=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx] * 1.5),
-                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
-                fontsize=12, color='red')
-    
-    # 子图2：Final Spectrum Error vs Beta
-    ax2.plot(beta_values, avg_spectrum_error, 'o-', color='green', label='Final Spectrum Error')
-    ax2.fill_between(beta_values, 
-                    avg_spectrum_error - np.array(std_spectrum_error), 
-                    avg_spectrum_error + np.array(std_spectrum_error), 
-                    color='green', alpha=0.2)
-    ax2.set_xlabel('Beta')
-    ax2.set_ylabel('Final Spectrum Error')
-    ax2.set_xticks(beta_values)
-    ax2.set_yscale('log')
-    ax2.set_title('Final Spectrum Error vs Beta')
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    
-    # 标记最低点对应的 Beta
-    min_spectrum_error_idx = np.argmin(avg_spectrum_error)
-    ax2.annotate(f'Best Beta: {beta_values[min_spectrum_error_idx]}', 
-                xy=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx]),
-                xytext=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx] * 1.5),
-                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
-                fontsize=12, color='red')
-    
-    # 设置 Beta 轴为对数坐标
-    ax1.set_xscale('log')
-    ax2.set_xscale('log')
-    
-    plt.tight_layout()
-    
-    # 保存图形
-    output_path = os.path.join(OUTPUT_DIR, 'final_performance_vs_beta.png')
-    plt.savefig(output_path)
-    print(f"Saved final performance plot to {output_path}")
-    plt.close(fig)
+    # 绘制斜率对比图
+    plot_slope_verification(slope_data, OUTPUT_DIR)
 
 
 if __name__ == "__main__":
