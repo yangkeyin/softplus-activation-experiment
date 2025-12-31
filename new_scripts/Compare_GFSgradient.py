@@ -89,10 +89,14 @@ def calculate_decay_base(model, B_singularity):
     
     # Get the last hidden layer (before output layer) 
     first_hidden_layer = layers[0]  # Third Linear layer before output 
+    # two_hidden_layer = layers[2]  # Fifth Linear layer before output
     
     # Extract weights and biases 
     w = first_hidden_layer.weight.detach().cpu().numpy().flatten()  # Shape: (width,) 
     b = first_hidden_layer.bias.detach().cpu().numpy()  # Shape: (width,) 
+
+    # w_1 = two_hidden_layer.weight.detach().cpu().numpy().flatten()  # Shape: (width,)
+    # b_1 = two_hidden_layer.bias.detach().cpu().numpy()  # Shape: (width,)
     
     
     # Calculate singularity distances for each hidden neuron 

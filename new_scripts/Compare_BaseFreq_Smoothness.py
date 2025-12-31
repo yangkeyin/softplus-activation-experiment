@@ -188,7 +188,7 @@ colors = [cmap(i) for i in np.linspace(0, 0.9, len(BASE_FREQ_VALUES))]
 
 for i, base in enumerate(BASE_FREQ_VALUES):
     res = results[base]
-    label = f"Base={base:.0f} (Slope={res['slope']:.3f})"
+    label = f"Base={base:.0f}"
     plt.plot(degrees, res['pred_coeffs'], color=colors[i], linewidth=2, alpha=0.8, label=label)
 
 plt.yscale('log')
@@ -199,6 +199,7 @@ plt.ylim(1e-5, 1.0)
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
+plt.savefig(OUTPUT_DIR + "BaseFreq_Spectral_Decay.png")
 plt.show()
 
 # --- Plot 2: 拟合曲线对比 (Spatial Domain) ---
@@ -212,8 +213,8 @@ for i, base in enumerate(BASE_FREQ_VALUES):
 plt.title("Spatial Fitting Comparison")
 plt.legend()
 plt.tight_layout()
-plt.show()
 plt.savefig(OUTPUT_DIR + "BaseFreq_Fitting_Comparison.png")
+plt.show()
 
 # --- Plot 3: 核心指标关联 (Metrics Correlation) ---
 plt.figure(figsize=(10, 5))
@@ -229,7 +230,6 @@ plt.ylabel("Spectral Decay Slope (Lower is Slower Decay)")
 plt.title("Freq Bias vs. Base Frequency")
 plt.grid(True)
 plt.gca().invert_yaxis() # 注意：Slope越小表示衰减越慢(越高频)，反转Y轴便于直观理解"高频能力"
-plt.savefig(OUTPUT_DIR + "BaseFreq_vs_Slope.png")
 
 # 子图2: Dirichlet Energy (Internal Smoothness)
 plt.subplot(1, 2, 2)
@@ -243,8 +243,8 @@ plt.title("Internal Feature Sharpness")
 plt.grid(True, axis='y')
 
 plt.tight_layout()
+plt.savefig(OUTPUT_DIR + "BaseFreq_Metrics_Correlation.png")
 plt.show()
-plt.savefig(OUTPUT_DIR + "BaseFreq_vs_Energy.png")
 
 # ==========================================
 # 6. Summary

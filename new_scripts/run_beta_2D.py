@@ -5,6 +5,7 @@ import torch.nn as nn
 import os
 import sys
 import pickle
+from scipy.interpolate import RectBivariateSpline
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 从utils.py中只导入set_seed函数
@@ -29,7 +30,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
-OUTPUT_DIR = "figures/beta_2D_x2ADDy2_SGD_momentum0.9_lr0.002"
+OUTPUT_DIR = "figures/beta_2D_inter_x2ADDy2_Adam_lr0.001"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 创建模型保存目录
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -50,19 +51,20 @@ class FNNModel2D(nn.Module):
 def generate_data_2D(data_range, train_points_per_dim, test_points_per_dim, device):
     """
     生成2D网格数据
+    使用 'ij' 索引以匹配 RectBivariateSpline 的 z[i,j] = f(x[i], y[j]) 期望
     """
-    # 1. 训练数据 (9x9 网格)
+    # 1. 训练数据 (9x9 网格) - 使用 'ij' 索引
     x_ticks = np.linspace(data_range[0], data_range[1], train_points_per_dim)
     y_ticks = np.linspace(data_range[0], data_range[1], train_points_per_dim)
-    xx_train, yy_train = np.meshgrid(x_ticks, y_ticks)
+    xx_train, yy_train = np.meshgrid(x_ticks, y_ticks, indexing='ij')
     X_train_np = np.vstack([xx_train.ravel(), yy_train.ravel()]).T
     # 使用全局定义的目标函数
     y_train_np = TARGET_FUNC_2D(X_train_np[:, 0], X_train_np[:, 1])
     
-    # 2. 测试数据 (50x50 网格)
+    # 2. 测试数据 (50x50 网格) - 使用 'ij' 索引
     x_ticks_test = np.linspace(data_range[0], data_range[1], test_points_per_dim)
     y_ticks_test = np.linspace(data_range[0], data_range[1], test_points_per_dim)
-    xx_test, yy_test = np.meshgrid(x_ticks_test, y_ticks_test)
+    xx_test, yy_test = np.meshgrid(x_ticks_test, y_ticks_test, indexing='ij')
     X_test_np = np.vstack([xx_test.ravel(), yy_test.ravel()]).T
     # 使用全局定义的目标函数
     y_test_np = TARGET_FUNC_2D(X_test_np[:, 0], X_test_np[:, 1])
@@ -73,11 +75,14 @@ def generate_data_2D(data_range, train_points_per_dim, test_points_per_dim, devi
     X_test = torch.tensor(X_test_np, dtype=torch.float32).to(device)
     y_test = torch.tensor(y_test_np, dtype=torch.float32).reshape(-1, 1).to(device)
     
-    # 返回 (X_test, y_test) 和 (xx_test, yy_test) 等以便绘图
-    return X_train, y_train, X_test, y_test, xx_train, yy_train, xx_test, yy_test
+    # 重塑 y_train_np 为2D网格形状用于样条插值
+    y_train_grid = y_train_np.reshape(train_points_per_dim, train_points_per_dim)
+    
+    # 返回所有必要的数据用于绘图和样条插值
+    return X_train, y_train, X_test, y_test, xx_train, yy_train, y_train_grid, x_ticks, y_ticks, xx_test, yy_test
 
 
-def plot_each_epoch_2D(results, xx_train, yy_train, y_train, xx_test, yy_test, y_test, beta, output_dir):
+def plot_each_epoch_2D(results, xx_train, yy_train, y_train_grid, xx_test, yy_test, y_test, beta, output_dir):
     seeds = list(results.keys())
     epochs = list(results[seeds[0]].keys())
     for epoch in epochs:
@@ -100,7 +105,6 @@ def plot_each_epoch_2D(results, xx_train, yy_train, y_train, xx_test, yy_test, y
         avg_y_pred_test = np.mean([results[seed][epoch]["y_pred_test"].reshape(test_shape) for seed in seeds], axis=0)
         
         # 重塑真实值以适应网格形状
-        y_train_grid = y_train.reshape(train_shape)
         y_test_grid = y_test.reshape(test_shape)
         
         # 行 0: 训练集 (9x9)
@@ -159,7 +163,24 @@ def plot_each_epoch_2D(results, xx_train, yy_train, y_train, xx_test, yy_test, y
 
 def main():
     # 准备数据 - 调用generate_data_2D函数
-    X_train, y_train, X_test, y_test, xx_train, yy_train, xx_test, yy_test = generate_data_2D(DATA_RANGE, 9, 50, DEVICE)
+    X_train, y_train, X_test, y_test, xx_train, yy_train, y_train_grid, x_ticks, y_ticks, xx_test, yy_test = generate_data_2D(DATA_RANGE, 9, 50, DEVICE)
+    
+    # 计算三次样条插值基线
+    print("Calculating Cubic Spline Interpolation baseline...")
+    y_train_np = y_train.cpu().numpy().flatten()
+    y_test_np = y_test.cpu().numpy().flatten()
+    X_test_np = X_test.cpu().numpy()
+    
+    # 创建 RectBivariateSpline 插值器
+    # 使用 'ij' 索引的网格，y_train_grid 形状为 (9, 9)
+    spline_interpolator = RectBivariateSpline(x_ticks, y_ticks, y_train_grid, kx=3, ky=3)
+    
+    # 在测试集(50x50)的坐标上进行插值 - 逐点评估
+    y_pred_spline_flat = spline_interpolator(X_test_np[:, 0], X_test_np[:, 1], grid=False)
+    
+    # 计算样条插值的 Test RMS
+    spline_test_rms = np.sqrt(np.mean((y_pred_spline_flat - y_test_np)**2))
+    print(f"Cubic Spline Test RMS: {spline_test_rms:.6f}")
     
     # 初始化基线结果字典
     results_base = {
@@ -170,7 +191,10 @@ def main():
         'xx_train': xx_train,
         'yy_train': yy_train,
         'xx_test': xx_test,
-        'yy_test': yy_test
+        'yy_test': yy_test,
+        'y_pred_spline': y_pred_spline_flat,
+        'spline_test_rms': spline_test_rms,  # 添加样条插值基线
+        'DATA_RANGE': DATA_RANGE
     }
 
     # 为每个beta都定义一个颜色
@@ -206,7 +230,7 @@ def main():
 
             # 训练模型
             criterion = nn.MSELoss()
-            optimizer = torch.optim.SGD(model.parameters(), lr=0.002, momentum=0.9)
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             num_epochs = EPOCHS
             for epoch in range(num_epochs):
                 model.train()
@@ -242,6 +266,7 @@ def main():
                     
                     # 保存基线指标
                     baseline_metrics[beta][seed][epoch + 1] = {
+                        "train_rms": train_rms,
                         "test_rms_base": test_rms,
                         "y_pred_test_base": y_pred_test.cpu().detach().numpy().flatten(),
                         "y_pred_train_base": y_pred.cpu().detach().numpy().flatten()
@@ -254,7 +279,7 @@ def main():
                         print(f"Saved model to {model_path}")
 
         # 可视化训练结果 - 调用plot_each_epoch_2D函数
-        plot_each_epoch_2D(results, xx_train, yy_train, y_train.cpu().numpy().flatten(), 
+        plot_each_epoch_2D(results, xx_train, yy_train, y_train_grid, 
                           xx_test, yy_test, y_test.cpu().numpy().flatten(), beta, output_dir)
     
     # 利用rms_list绘制beta与rms的关系图
@@ -282,6 +307,9 @@ def main():
 
         ax_seed[0].semilogy(epochs_recorded, rms_value, "-o", label=f"Beta={beta}", color=color_map[beta])
         ax_seed[1].semilogy(epochs_recorded, test_rms_value, "-o", label=f"Beta={beta}", color=color_map[beta])
+
+    # 添加样条插值基线到测试RMS图
+    ax_seed[1].axhline(y=spline_test_rms, color='red', linestyle='--', linewidth=2, label=f'Cubic Spline (RMS={spline_test_rms:.6f})')
 
     ax_seed[0].set_title(f"Train RMS vs Epoch")
     ax_seed[0].set_xlabel("Epoch")

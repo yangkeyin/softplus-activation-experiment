@@ -21,18 +21,18 @@ SEQ_LEN = 250  # 历史序列长度 L
 PRED_LEN = 250  # 预测序列长度 H, H = L
 TOTAL_SERIES_LENGTH = 10000  # 用于生成窗口的原始序列总长
 N_POINTS = SEQ_LEN  # 为了兼容原有代码
-KEY_FREQS_K = [20, 40, 60]  # k1, k2, k3 - 关键频率分量k
+KEY_FREQS_K = [20, 70, 120]  # k1, k2, k3 - 关键频率分量k
 NOISE_LEVEL = 0.5
 
 # 振幅配置（核心）
-AMPS_SCENARIO_1 = [1.5, 1.0, 0.5]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
-AMPS_SCENARIO_2 = [0.5, 1.0, 1.5]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
+AMPS_SCENARIO_1 = [1., 1., 1.0]  # 低频偏置: k1振幅 > k2振幅 > k3振幅
+AMPS_SCENARIO_2 = [1., 1., 1.]  # 高频偏置: k1振幅 < k2振幅 < k3振幅
 
 # 实验配置
 KERNEL_SIZES_TO_TEST = [3, 25, 35]  # 对比 "高通" vs "低通" 两种极端情况
-EPOCHS = 2000
+EPOCHS = 20
 EVAL_STEP = 1  # 每50个epoch评估一次相对误差
-LR = 0.001
+LR = 0.0001
 BATCH_SIZE = 64  # 批量大小
 N_SAMPLES_TRAIN = 2000
 N_SAMPLES_TEST = 400
@@ -42,7 +42,7 @@ SCENARIOS = {"Scenario_1_LowFreqBias": AMPS_SCENARIO_1, "Scenario_2_HighFreqBias
 NUM_XTICKS = 10  # x轴显示的刻度数量
 
 # 输出目录
-OUTPUT_DIR = './figures/CNN_freq_bias_denoise_amp0.5-1.5_epo2000_noiselevel0.5'
+OUTPUT_DIR = './figures/CNN_freq_bias_forcast_same_amp1.0_epo20_noiselevel0.5_lr0.0001'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -218,11 +218,6 @@ def get_avg_spectrum(data_tensor):
     
     # 计算平均频谱并只返回正频率部分
     avg_fft_mag = np.mean(fft_mag, axis=0)
-    ax[1].plot(avg_fft_mag[:N_POINTS // 2])
-    ax[1].set_title('Average FFT Spectrum')
-    ax[1].set_ylabel('Amplitude')
-    fig.tight_layout()
-    fig.show()
     return avg_fft_mag[:N_POINTS // 2]
 
 def get_avg_relative_error(pred_tensor, target_tensor, key_indices_k):
@@ -373,7 +368,7 @@ def visualize_results(results):
         ax1.plot(k_axis, results['Scenario_1_LowFreqBias']['avg_target_spectrum'], 'g-', label='Ground Truth')
         ax1.plot(k_axis, results['Scenario_1_LowFreqBias'][kernel_size]['avg_pred_spectrum'], 'r-', 
                 label=f'Forecasting (k={kernel_size})')
-        ax1.set_title('场景 1 (低频偏置) 频谱')
+        ax1.set_title('相同频谱')
         ax1.set_xlabel('F (Frequency Component k)')
         ax1.set_ylabel('Amplitude')
         ax1.set_xlim(0, max_k)

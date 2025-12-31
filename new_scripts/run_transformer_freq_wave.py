@@ -35,9 +35,9 @@ RANGE_TRAIN_END = 3500
 RANGE_TEST_START = 3500
 RANGE_TEST_END = 5000
 
-EPOCHS = 20
+EPOCHS = 50
 BATCH_SIZE = 32
-LR = 0.01
+LR = 0.001
 WEIGHT_DECAY = 1e-5
 SEEDS = [42]
 
@@ -124,7 +124,7 @@ class TransformerSeq2SeqModel(nn.Module):
     def _create_pos_encoding(self, seq_len, d_model):
         pe = torch.zeros(seq_len, d_model)
         position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(100.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         if d_model % 2 != 0:
             pe[:, 1::2] = torch.cos(position * div_term[:-1])
