@@ -8,6 +8,11 @@ import pickle
 import datetime
 from scipy.interpolate import interp1d
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 统一绘画风格
+plt.rcParams['font.family'] = 'serif' # 匹配论文风格
+plt.rcParams['font.serif'] = ['Times New Roman']
+plt.rcParams['mathtext.fontset'] = 'cm' # 数学公式字体
+plt.rcParams['figure.dpi'] = 300 # 高清图
 
 from src.utils import rescale, get_fq_coef
 
@@ -22,7 +27,7 @@ BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
 date_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_DIR = f"figures/beta_base_{date_time}"
+OUTPUT_DIR = f"figures/beta_article_photo_{date_time}"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 创建模型保存目录
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -128,60 +133,54 @@ def plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_
     """
     绘制最终性能指标与beta的关系图
     """
-    # 创建图形，绘制带填充区间的折线图
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+    # 使用Seaborn colorblind palette的深色系
+    colors = ['#2D3748', '#E53E3E']  # 深灰色线条，鲜艳红色点
     
-    # 子图1：Final Test RMS vs Beta
-    ax1.plot(beta_values, avg_test_rms, 'o-', color='blue', label='Final Test RMS')
-    ax1.fill_between(beta_values, 
+    # 创建图形，只保留子图1
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 8))
+    
+    # 将beta值转换为分类变量位置
+    categorical_positions = np.arange(len(beta_values))
+    
+    # 子图1：Final Test RMS vs Beta (使用分类轴)
+    ax1.plot(categorical_positions, avg_test_rms, 'o-', 
+             color=colors[0], linewidth=2.5, markersize=8, label='Final Test RMS')
+    ax1.fill_between(categorical_positions, 
                     [avg - std for avg, std in zip(avg_test_rms, std_test_rms)], 
                     [avg + std for avg, std in zip(avg_test_rms, std_test_rms)], 
-                    color='blue', alpha=0.2)
-    ax1.set_xlabel('Beta')
-    ax1.set_ylabel('Final Test RMS')
-    ax1.set_xticks(beta_values)
-    ax1.set_xticklabels([f"{b:.2f}" for b in beta_values])
+                    color=colors[0], alpha=0.3, edgecolor='none')  # 去掉edgecolor，增加透明度
+    ax1.scatter(categorical_positions, avg_test_rms, 
+               color=colors[1], s=100, zorder=5, label='Data Points')
+    
+    ax1.set_xlabel('Beta', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Final Test RMS', fontsize=14, fontweight='bold')
+    ax1.set_xticks(categorical_positions)
+    ax1.set_xticklabels([f"{b:.1f}" for b in beta_values])
     ax1.set_yscale('log')
-    ax1.set_title('Final Test RMS vs Beta')
-    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.set_title('Final Test RMS vs Beta', fontsize=16, fontweight='bold', pad=20)
+    ax1.grid(True, linestyle='--', alpha=0.3)
     
-    # 标记最低点对应的 Beta
+    # 找到最优beta值（最小测试RMS对应的索引）
     min_test_rms_idx = np.argmin(avg_test_rms)
-    ax1.annotate(f'Best Beta: {beta_values[min_test_rms_idx]}', 
-                xy=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx]),
-                xytext=(beta_values[min_test_rms_idx], avg_test_rms[min_test_rms_idx] * 1.5),
-                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
-                fontsize=12, color='red')
+    optimal_beta = beta_values[min_test_rms_idx]
     
-    # 子图2：Final Spectrum Error vs Beta
-    ax2.plot(beta_values, avg_spectrum_error, 'o-', color='green', label='Final Spectrum Error')
-    ax2.fill_between(beta_values, 
-                    [avg - std for avg, std in zip(avg_spectrum_error, std_spectrum_error)], 
-                    [avg + std for avg, std in zip(avg_spectrum_error, std_spectrum_error)], 
-                    color='green', alpha=0.2)
-    ax2.set_xlabel('Beta')
-    ax2.set_ylabel('Final Spectrum Error')
-    ax2.set_xticks(beta_values)
-    ax2.minorticks_off()
-    ax2.set_xticklabels([f"{b:.2f}" for b in beta_values])
-    ax2.set_yscale('log')
-    ax2.set_title('Final Spectrum Error vs Beta')
-    ax2.grid(True, linestyle='--', alpha=0.7)
+    # 在最优beta位置画垂直灰色虚线
+    ax1.axvline(x=min_test_rms_idx, color='gray', linestyle='--', linewidth=2, alpha=0.7)
     
-    # 标记最低点对应的 Beta
-    min_spectrum_error_idx = np.argmin(avg_spectrum_error)
-    ax2.annotate(f'Best Beta: {beta_values[min_spectrum_error_idx]}', 
-                xy=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx]),
-                xytext=(beta_values[min_spectrum_error_idx], avg_spectrum_error[min_spectrum_error_idx] * 1.5),
-                arrowprops=dict(facecolor='red', shrink=0.05, width=1.5),
-                fontsize=12, color='red')
+    # 在虚线旁边优雅地写上标注
+    ax1.text(min_test_rms_idx + 0.1, max(avg_test_rms) * 0.8, 
+             f'Optimal β={optimal_beta:.1f}', 
+             fontsize=12, fontweight='bold', 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8, edgecolor='gray'))
     
+    # 优化图例
+    ax1.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
     
     plt.tight_layout()
     
     # 保存图形
     output_path = os.path.join(output_dir, 'final_performance_vs_beta.png')
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Saved final performance plot to {output_path}")
     plt.close(fig)
 
