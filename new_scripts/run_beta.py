@@ -6,7 +6,9 @@ import os
 import sys
 import pickle
 import datetime
-from scipy.interpolate import interp1d
+
+# 导入gridspec用于复杂布局
+from matplotlib.gridspec import GridSpec
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 统一绘画风格
 plt.rcParams['font.family'] = 'serif' # 匹配论文风格
@@ -17,7 +19,7 @@ plt.rcParams['figure.dpi'] = 300 # 高清图
 from src.utils import rescale, get_fq_coef
 
 # 配置参数
-BETA = [1.0, 4.0, 8.0, 16.0]
+BETA = [1.0, 4.0, 16.0]
 TARGET_FUNC = lambda x: torch.sin(x)
 DATA_RANGE = [-2 * np.pi, 2 * np.pi]
 EPOCHS = 10000
@@ -27,7 +29,7 @@ BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
 date_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_DIR = f"figures/beta_article_photo_{date_time}"
+OUTPUT_DIR = f"figures/beta_article_photo_3to1"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 创建模型保存目录
 MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
@@ -129,52 +131,137 @@ def plot_slope_verification(slope_data, output_dir):
     plt.close(fig)
     print(f"Slope verification plot saved to {save_path}")
 
-def plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, output_dir):
+def plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, 
+                                   x_train, y_train, y_pred_data, y_test, output_dir):
     """
-    绘制最终性能指标与beta的关系图
+    绘制最终性能指标与beta的关系图 - 左三右一的大图布局
     """
-    # 使用Seaborn colorblind palette的深色系
-    colors = ['#2D3748', '#E53E3E']  # 深灰色线条，鲜艳红色点
     
-    # 创建图形，只保留子图1
-    fig, ax1 = plt.subplots(1, 1, figsize=(10, 8))
+    # 统一配色方案
+    COLOR_DATA = '#D62728'      # 砖红色：代表训练数据点
+    COLOR_MODEL = '#1F77B4'     # 深蓝色：代表模型拟合线
+    COLOR_TRUTH = 'gray'        # 灰色：代表Ground Truth
     
-    # 将beta值转换为分类变量位置
+    # 创建画布：宽一点，高一点
+    fig = plt.figure(figsize=(16, 10))
+    
+    # 定义网格：3行，2列，右边稍微宽一点
+    gs = GridSpec(3, 2, width_ratios=[1, 1.5], wspace=0.25, hspace=0.3)
+    
+    # 分配地盘 - 左边的三个位置
+    ax_beta1 = fig.add_subplot(gs[0, 0])    # 左上
+    ax_beta4 = fig.add_subplot(gs[1, 0])    # 左中
+    ax_beta16 = fig.add_subplot(gs[2, 0])   # 左下
+    
+    # 右边的一个大位置（跨越3行）
+    ax_main = fig.add_subplot(gs[:, 1])     # 右边大图
+    
+    # 生成密集的x值用于绘制平滑曲线
+    x_dense = np.linspace(DATA_RANGE[0], DATA_RANGE[1], 200)
+    x_dense_tensor = torch.tensor(x_dense, dtype=torch.float32).reshape(-1, 1).to(DEVICE)
+    
+    # Panel A: 左侧三个拟合图
+    betas_for_plot = [1.0, 4.0, 16.0]
+    axes = [ax_beta1, ax_beta4, ax_beta16]
+    titles = [
+        '(a) Under-fitting (β=1.0)',
+        '(b) Optimal Fitting (β=4.0)', 
+        '(c) Over-fitting (β=16.0)'
+    ]
+    
+    for i, (beta, ax, title) in enumerate(zip(betas_for_plot, axes, titles)):
+        # 获取该beta对应的模型预测数据（取第一个seed的最后一个epoch结果）
+        beta_idx = beta_values.index(beta)
+        seed_keys = list(y_pred_data[beta].keys())
+        pred_data = y_pred_data[beta][seed_keys[0]][EPOCHS]
+        y_pred_train = pred_data['y_pred_train_base']
+        y_pred_test = pred_data['y_pred_test_base']
+        
+        # 生成密集预测用于绘制平滑曲线
+        model_for_dense = FNNModel(n=100, beta=beta)
+        model_for_dense.load_state_dict(torch.load(
+            os.path.join(MODELS_DIR, f"model_beta_{beta}_seed_{seed_keys[0]}_epoch_{EPOCHS}.pth"),
+            map_location=DEVICE
+        ))
+        model_for_dense.eval()
+        model_for_dense.to(DEVICE)
+        
+        with torch.no_grad():
+            y_pred_dense = model_for_dense(x_dense_tensor).cpu().numpy().flatten()
+        
+        # 画真值 (Ground Truth)：作为背景参考，要淡，要退后
+        y_true_dense = TARGET_FUNC(x_dense_tensor).cpu().numpy().flatten()
+        ax.plot(x_dense, y_true_dense, 
+                color=COLOR_TRUTH, linestyle='--', linewidth=1.5, alpha=0.6, zorder=1, 
+                label='True Function')
+        
+        # 画模型拟合 (Model Fit)：主角，要顺滑，不要点，要连续
+        ax.plot(x_dense, y_pred_dense, 
+                color=COLOR_MODEL, linewidth=2.5, linestyle='-', zorder=2, 
+                label='Model Fit')
+        
+        # 画训练数据 (Training Data)：离散证据，要鲜艳，只要点，不要连线
+        ax.scatter(x_train, y_train, 
+                   color=COLOR_DATA, s=40, zorder=3, edgecolors='white', linewidth=0.5, 
+                   label='Training Samples')
+        
+        # 标题和标签
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.grid(True, linestyle=':', alpha=0.3, color = 'gray', zorder=0)
+        
+        # 为了美观，前两张图去掉X轴刻度标签
+        if i < 2:
+            ax.set_xticklabels([])
+        
+        # 设置坐标轴范围
+        ax.set_xlim(DATA_RANGE)
+        ax.set_ylim(-1.5, 1.5)
+    
+    # Panel B: 右侧U型大图
     categorical_positions = np.arange(len(beta_values))
     
-    # 子图1：Final Test RMS vs Beta (使用分类轴)
-    ax1.plot(categorical_positions, avg_test_rms, 'o-', 
-             color=colors[0], linewidth=2.5, markersize=8, label='Final Test RMS')
-    ax1.fill_between(categorical_positions, 
-                    [avg - std for avg, std in zip(avg_test_rms, std_test_rms)], 
-                    [avg + std for avg, std in zip(avg_test_rms, std_test_rms)], 
-                    color=colors[0], alpha=0.3, edgecolor='none')  # 去掉edgecolor，增加透明度
-    ax1.scatter(categorical_positions, avg_test_rms, 
-               color=colors[1], s=100, zorder=5, label='Data Points')
+    # 绘制U型曲线
+    ax_main.plot(categorical_positions, avg_test_rms, 'o-', 
+                 color=COLOR_MODEL, linewidth=3, markersize=10, label='Final Test RMS')
+    ax_main.fill_between(categorical_positions, 
+                        [avg - std for avg, std in zip(avg_test_rms, std_test_rms)], 
+                        [avg + std for avg, std in zip(avg_test_rms, std_test_rms)], 
+                        color=COLOR_MODEL, alpha=0.2, edgecolor='none')
+    ax_main.scatter(categorical_positions, avg_test_rms, 
+                   color=COLOR_DATA, s=120, zorder=5, label='Data Points')
     
-    ax1.set_xlabel('Beta', fontsize=14, fontweight='bold')
-    ax1.set_ylabel('Final Test RMS', fontsize=14, fontweight='bold')
-    ax1.set_xticks(categorical_positions)
-    ax1.set_xticklabels([f"{b:.1f}" for b in beta_values])
-    ax1.set_yscale('log')
-    ax1.set_title('Final Test RMS vs Beta', fontsize=16, fontweight='bold', pad=20)
-    ax1.grid(True, linestyle='--', alpha=0.3)
-    
-    # 找到最优beta值（最小测试RMS对应的索引）
-    min_test_rms_idx = np.argmin(avg_test_rms)
-    optimal_beta = beta_values[min_test_rms_idx]
+    ax_main.set_xlabel('β (Activation Smoothness)', fontsize=14, fontweight='bold')
+    ax_main.set_ylabel('Final Test RMS', fontsize=14, fontweight='bold')
+    ax_main.set_xticks(categorical_positions)
+    ax_main.set_xticklabels([f"{b:.1f}" for b in beta_values])
+    ax_main.set_yscale('log')
+    ax_main.set_title('(d) Generalization Gap', fontsize=14, fontweight='bold', pad=20)
+    ax_main.grid(True, linestyle='--', alpha=0.3)
     
     # 在最优beta位置画垂直灰色虚线
-    ax1.axvline(x=min_test_rms_idx, color='gray', linestyle='--', linewidth=2, alpha=0.7)
+    min_test_rms_idx = np.argmin(avg_test_rms)
+    optimal_beta = beta_values[min_test_rms_idx]
+    ax_main.axvline(x=min_test_rms_idx, color='gray', linestyle='--', linewidth=2, alpha=0.7)
     
     # 在虚线旁边优雅地写上标注
-    ax1.text(min_test_rms_idx + 0.1, max(avg_test_rms) * 0.8, 
-             f'Optimal β={optimal_beta:.1f}', 
-             fontsize=12, fontweight='bold', 
-             bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8, edgecolor='gray'))
+    ax_main.text(min_test_rms_idx + 0.05, max(avg_test_rms) * 0.6, 
+                 f'Optimal β={optimal_beta:.1f}', 
+                 fontsize=12, fontweight='bold', 
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9, edgecolor='gray'))
     
-    # 优化图例
-    ax1.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
+    # 优化图例 - 去框去阴影
+    ax_main.legend(loc='upper right', frameon=False, fontsize=12)
+    
+    # 随便找一个画全了元素的子图（比如左上角的ax_beta1）拿句柄
+    lines, labels = ax_beta1.get_legend_handles_labels()
+    
+    # 在画布顶端居中放置一个全局图例
+    fig.legend(lines, labels, 
+               loc='upper center',      # 放在正上方
+               bbox_to_anchor=(0.5, 0.96), # 微调位置(0.5是水平居中, 0.96是垂直高度)
+               ncol=3,                  # 横排，分3列
+               frameon=False,           # 去掉丑陋的方框
+               fontsize=12)             # 字号稍微大一点
     
     plt.tight_layout()
     
@@ -552,8 +639,25 @@ def main():
         avg_spectrum_error.append(np.mean(final_spectrum_error_list))
         std_spectrum_error.append(np.std(final_spectrum_error_list))
     
+    # 构建y_pred_data字典，用于绘制左三右一的布局
+    y_pred_data = {}
+    for beta in BETA:
+        y_pred_data[beta] = {}
+        for seed in SEEDS:
+            if seed not in y_pred_data[beta]:
+                y_pred_data[beta][seed] = {}
+            # 获取该种子在最后一个epoch的预测数据
+            epoch = EPOCHS
+            if epoch in baseline_metrics[beta][seed]:
+                y_pred_data[beta][seed][epoch] = {
+                    'y_pred_train_base': baseline_metrics[beta][seed][epoch]['y_pred_train_base'],
+                    'y_pred_test_base': baseline_metrics[beta][seed][epoch]['y_pred_test_base']
+                }
+
     # 调用函数绘制final performance vs beta图（修复了x轴显示问题）
-    plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, OUTPUT_DIR)
+    plot_final_performance_vs_beta(beta_values, avg_test_rms, std_test_rms, avg_spectrum_error, std_spectrum_error, 
+                                   x_train.cpu().numpy().flatten(), y_train.cpu().numpy().flatten(), 
+                                   y_pred_data, y_test.cpu().numpy().flatten(), OUTPUT_DIR)
     
     # 收集斜率分析数据
     slope_data = []
