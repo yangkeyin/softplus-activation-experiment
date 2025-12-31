@@ -6,6 +6,7 @@ import os
 import sys
 import pickle
 import datetime
+from scipy.interpolate import interp1d
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils import rescale, get_fq_coef
@@ -18,6 +19,7 @@ EPOCHS = 10000
 SEEDS = [100, 200, 300, 400, 500]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASELINE_EPOCH = 10000  # 用于保存基线模型的epoch
+INIT_STD = None # 初始化标准差
 
 # 输出目录配置 - 修改为符合微调脚本要求的结构
 date_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -35,8 +37,15 @@ class FNNModel(nn.Module):
             nn.Softplus(beta=beta),
             nn.Linear(n, 1)
         )
+        if INIT_STD is not None:
+            self.layers.apply(lambda m: self._init_weights(m, INIT_STD))    
     def forward(self, x):
         return self.layers(x)
+    
+    def _init_weights(self, m, init_std):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, mean=0.0, std=init_std)
+            nn.init.constant_(m.bias, 0.0)
         
 def set_seed(seed_value):
     """设置所有需要随机种子的库的种子。"""
@@ -49,13 +58,13 @@ def set_seed(seed_value):
     random.seed(seed_value)
 
 
-def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, output_dir):
+def plot_each_epoch(results, x_train, y_train, x_test, y_test, true_coef, beta, output_dir, std= 0.5):
     seeds = list(results.keys())
     epochs = list(results[seeds[0]].keys())
     for epoch in epochs:
         # 可视化训练结果
         fig, ax = plt.subplots(3,2, figsize=(20, 15))
-        fig.suptitle(f"Softplus Activation with Beta={beta} Epoch {epoch+1}")
+        fig.suptitle(f"Softplus (Beta={beta}, Std={std}) Epoch {epoch+1}")
         # 计算每个seed下所有指标的平均值
         avg_train_rms = np.mean([results[seed][epoch]["train_rms"] for seed in seeds])
         avg_test_rms = np.mean([results[seed][epoch]["test_rms"] for seed in seeds])
@@ -199,6 +208,22 @@ def main():
     sorted_indices = torch.argsort(x_test[:, 0])
     x_test_sorted = x_test[sorted_indices]
     y_test_sorted = y_test[sorted_indices]
+
+    # 验证分段线性插值
+    # 把 tensor 转成 numpy
+    x_train_np = x_train.numpy().flatten()
+    y_train_np = y_train.numpy().flatten()
+    x_test_np = x_test_sorted.numpy().flatten()
+    y_test_np = y_test.numpy().flatten()
+
+    # 构建插值函数
+    f_linear = interp1d(x_train_np, y_train_np, kind='linear', fill_value="extrapolate")
+    y_pred_linear = f_linear(x_test_np)
+
+    # 计算线性插值在测试集上的 RMS 误差
+    linear_test_rms = np.sqrt(np.mean((y_pred_linear - y_test_np)**2))
+    print(f"🌟 Linear Interpolation Test RMS: {linear_test_rms:.6f}")
+
     # 移动数据到GPU
     x_train, y_train, x_test, y_test = x_train.to(DEVICE), y_train.to(DEVICE), x_test_sorted.to(DEVICE), y_test_sorted.to(DEVICE)
     
@@ -234,6 +259,8 @@ def main():
         # 定义输出目录
         output_dir = f"{OUTPUT_DIR}/beta_{beta}/"
         os.makedirs(output_dir, exist_ok=True)
+
+        std_init = None
         
         for seed in SEEDS:
             print(f"Training beta={beta}, seed={seed}")
@@ -244,6 +271,7 @@ def main():
 
             # 搭建模型
             model = FNNModel(n=100, beta=beta)
+            std_init = model.layers[0].weight.std().item()
             model.to(DEVICE)
 
             # 训练模型
@@ -306,7 +334,7 @@ def main():
                         print(f"Saved model to {model_path}")
 
         # 可视化训练结果
-        plot_each_epoch(results, x_train.cpu().numpy().flatten(), y_train.cpu().numpy().flatten(), x_test.cpu().numpy().flatten(), y_test.cpu().numpy().flatten(), true_coef, beta, output_dir)
+        plot_each_epoch(results, x_train.cpu().numpy().flatten(), y_train.cpu().numpy().flatten(), x_test.cpu().numpy().flatten(), y_test.cpu().numpy().flatten(), true_coef, beta, output_dir , std=std_init)
     
 
     # 利用rms_list绘制beta与rms的关系图
