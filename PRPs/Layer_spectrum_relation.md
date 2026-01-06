@@ -33,6 +33,8 @@ layers.append(Softplus(beta))
 layers.append(Linear(width, 1))
 self.net = Sequential(*layers)
 ```
+## Expected Deverables
+Update: 决定采用 Post-hoc Visualization。单独编写脚本将 L2, L3, L5, L8 的频谱绘制在同一张图上，去除 Linear 插值干扰，直观对比 Log-Slope。
 
 ## 注意
 1. 实验结果保存路径要自动生成，包含numlayers、width、beta等参数.可参考
@@ -44,3 +46,4 @@ self.net = Sequential(*layers)
 2. 每个实验结果要保存config.json
 3. 参数通过parser输入
 许多代码尽可能参考文件Limit_Test_Beta_Refractor.py
+
